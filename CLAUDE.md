@@ -1,53 +1,48 @@
-# Agent Mission Control
+# Claude Skill Studio
 
-Local coding-agent workshop app. Seed data is the reliable fallback; project-scoped Claude hooks can
-add safe live lifecycle metadata. Prometheus is not implemented.
+Local Claude Code skill management and test application.
 
-## Code map
+## Product and storage contract
 
-- `src/` — React Runs, Compare, Decisions, readiness, projections, and seed data
-- `server/` — local hook collector, sanitizer, readiness, in-memory store, and SSE
-- `shared/mission-event.ts` — the only browser-facing lifecycle event contract
-- `scripts/` — doctor, workshop launcher, preflight, and reversible project-hook setup
-- `tests/` — behavior and boundary verification
-- `docs/` — architecture, conventions, privacy contract, and runbooks
-- `challenges/` — independent, roughly 20-minute workshop paths
+- Library discovers personal `~/.claude/skills` and explicitly trusted project `.claude/skills`.
+- Editor keeps drafts separate from installed files and promotes only by explicit action.
+- Test Lab runs bounded, no-tools `claude -p` tests using existing CLI authentication.
+- Compare uses saved final results tied to immutable skill versions and test cases.
+- The filesystem is the authority for installed state.
+- SQLite stores trusted roots, immutable versions, test cases, and saved final results.
+- Active partial traces are ephemeral SSE data and are not persisted as results.
 
 ## Commands
 
 ```bash
 npm install
-npm run doctor
-npm run workshop
 npm run dev
-npm run typecheck
-npm run lint
-npm run format:check
-npm test
-npm run build
 npm run preflight
-npm run connect:claude
-npm run disconnect:claude
 ```
+
+## Code map
+
+- `app/domain/` — pure Skill Studio contracts
+- `app/backend/catalog/` — skill discovery, validation, and safe filesystem access
+- `app/backend/versions/` — SQLite migrations, versions, test cases, and results
+- `app/backend/testing/` — bounded Claude subprocess and ephemeral traces
+- `app/backend/api/` — loopback HTTP, SSE, origin, and mutation security
+- `app/frontend/shell/` — browser shell and global styling
+- `app/frontend/state/` — API client and application orchestration
+- `app/frontend/features/` — Library, Editor, Test Lab, and Compare
+- `app/frontend/model/` — pure presentation projections
+- `app/frontend/ui/` — reusable accessible components
+- `app/entrypoints/` — browser and server startup
+- `tests/` — boundary-mirrored backend and frontend tests
 
 ## Boundaries
 
-- Node `^20.19.0 || >=22.12.0`; React, Vite, strict TypeScript, one browser app, and one
-  small local Node collector.
-- Keep one normalized `MissionEvent` model across seed and hook inputs.
-- No database, auth, cloud service, API key, deployment infrastructure, or real permission control.
-- Runs, Compare, and Decisions are the durable product areas.
-- Facilitator scenarios and all Decisions actions are simulated local UI state.
-- Reject prompts, messages, code, diffs, tool arguments, commands, raw paths, environment variables,
-  secrets, and transcripts before storage.
-- Project hooks apply only to Claude sessions started from this repository. Preserve unrelated
-  project settings and never modify user-level settings.
-- Collector failures must not delay or block Claude Code; seed data remains available.
-- Do not read Claude transcript files.
-- Prometheus is deferred. Do not add it to attendee setup or imply live tokens or cost exist.
+Read `docs/architecture.md`, `docs/conventions.md`, and `docs/privacy.md` first. Keep external I/O at
+catalog, storage, runner, and HTTP/SSE boundaries. Validate filesystem paths, database input, API
+input, and runner events. Never infer project trust, silently merge same-name skills, enable Claude
+tools during tests, persist partial traces, or log prompts, skill bodies, model output, credentials,
+or environment values.
 
-Read `docs/architecture.md` before structural changes and `docs/conventions.md` before implementation.
-Use `docs/runbooks/local-development.md` and `docs/runbooks/claude-telemetry.md` for setup. Real-agent
-proof requires an installed, authenticated Claude CLI session in this repository.
-
-Changed behavior requires focused verification and a final diff review.
+Do not add Cursor skill support, deployment, application auth, cloud services, remote telemetry, or
+background agents. Changed behavior needs focused tests, `npm run preflight`, and a
+final diff review that preserves existing work.

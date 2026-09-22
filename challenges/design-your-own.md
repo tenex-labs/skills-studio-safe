@@ -4,7 +4,7 @@
 
 ## Outcome
 
-Deliver one small, coherent improvement without crossing the repository's product or privacy
+Deliver one small Claude Skill Studio improvement without crossing product, trust, or persistence
 boundaries.
 
 ## Define before coding
@@ -17,31 +17,29 @@ Write five short bullets:
 4. **Non-goals:** what tempting adjacent work is excluded?
 5. **Verification:** what evidence proves the behavior?
 
-Ask only questions whose answers would materially change the slice. If interaction is uncertain,
-use the example feature-mockup skill and stop the mockup before production implementation.
+Ask only questions whose answers would materially change the slice.
 
 ## Constraints
 
-- Fit the change into the existing normalized event model unless an approved safe metadata field is
-  genuinely required.
-- Do not add a database, auth, cloud service, deployment, real approval control, or transcript access.
-- Keep seed fallback complete and telemetry optional.
-- Do not add Prometheus; choose an existing Runs, Compare, Decisions, readiness, or privacy seam.
+- Keep installed files, immutable versions, test cases, ephemeral traces, and saved results distinct.
+- Do not add Cursor skills, application auth, cloud services, deployment, or tool-enabled runs.
+- Never trust a project implicitly or merge same-name skill content.
+- Choose an existing Library, Editor, Test Lab, Compare, catalog, storage, or runner seam.
 - Prefer one vertical slice with focused tests over placeholders.
 
 ## Acceptance
 
 - The five bullets are explicit and the implementation matches them.
 - Loading, empty, error, permission, and success states were considered.
-- No rejected content enters fixtures, logs, storage, SSE, or UI.
+- Sensitive content appears only where the privacy contract permits and never in operational logs.
 - The final diff contains no unrelated cleanup.
 
 ## Verify
 
 Run focused verification for the stated outcome, then `npm test`, `npm run build`, and a final diff
-review against `docs/privacy.md`.
+review against `docs/privacy.md` and `docs/architecture.md`.
 
 ## Recovery and cleanup
 
-If the slice cannot be proved with seed data in the time box, reduce it. Remove temporary fixtures,
-disconnect project hooks if you installed them, and leave no generated artifacts.
+If the slice cannot be proved with fixtures in the time box, reduce it. Remove temporary databases,
+skills, and runner output, and leave no generated artifacts.

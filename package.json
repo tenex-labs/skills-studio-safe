@@ -1,5 +1,5 @@
 {
-  "name": "agent-mission-control",
+  "name": "claude-skill-studio",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,31 +7,29 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "concurrently -k -n ui,collector -c green,cyan \"npm:dev:ui\" \"npm:dev:server\"",
+    "dev": "concurrently -k -n ui,api -c blue,cyan \"npm:dev:ui\" \"npm:dev:server\"",
     "dev:ui": "vite",
-    "dev:server": "tsx watch server/index.ts",
-    "doctor": "node scripts/doctor.mjs",
-    "workshop": "node scripts/workshop.mjs",
+    "dev:server": "tsx watch app/entrypoints/server.ts",
     "test": "vitest run",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "format:check": "prettier --check .",
-    "preflight": "node scripts/preflight.mjs && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
-    "connect:claude": "node scripts/connect-claude.mjs",
-    "disconnect:claude": "node scripts/disconnect-claude.mjs"
+    "preflight": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^4.6.5"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

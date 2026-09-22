@@ -1,97 +1,82 @@
 # Architecture
 
-Agent Mission Control is one local browser app, one local collector, and reversible project-scoped
-Claude hooks. Deterministic seed data keeps the product and challenges usable when no live event is
-available.
+Claude Skill Studio is one local browser application and one loopback Node process.
 
-## Startup and readiness
+## Components and flow
 
 ```text
-npm run workshop
-  ├─ doctor: Node, CLI, files, ports, repository scope, hook state
-  ├─ install only owned hooks in project settings
-  └─ start collector + Vite UI
+personal ~/.claude/skills ───────┐
+trusted project .claude/skills ──┴─> catalog scanner ─> Library / Editor
+                                             |
+                                             v
+                                explicit promote writes SKILL.md
 
-second terminal in this repository
-  └─ authenticated `claude` session -> project hooks -> collector
+draft + immutable version + test case
+                  |
+                  v
+        bounded runner -> direct `claude -p` (tools disabled, existing CLI auth)
+                  |
+       partial events over SSE ───────────────> Test Lab (ephemeral)
+                  |
+        completed final result
+                  v
+          SQLite -> Compare
 ```
 
-The UI reports three independent facts:
+## Authority and persistence
 
-1. **Collector ready** — this app, not an arbitrary listener, answers its local health check.
-2. **Project hooks installed** — the owned entries exist in this repository's Claude settings.
-3. **First event received** — the collector accepted at least one supported live event.
+The data classes must not blur:
 
-An open browser or SSE connection is not proof of a live agent. Until the third condition is true,
-seed data remains visible and clearly labeled.
+- **Installed files:** current `SKILL.md` files are the authority for what is installed. A catalog
+  record is a cache/index, not proof that a file still exists.
+- **Version database:** SQLite stores append-only skill-version snapshots, reusable test cases,
+  trusted project roots, and supporting metadata. Updating an installed skill creates a new version;
+  it does not mutate old version content.
+- **Ephemeral traces:** accepted runner progress events exist only for the active process and SSE
+  subscribers. Disconnecting the browser may lose them. They are not automatically stored.
+- **Saved results:** completed terminal results become durable SQLite records. Each references the
+  exact skill version, test case, runner settings, and outcome.
 
-## Event data flow
+## Catalog and precedence
 
-```text
-deterministic seed events ─────────────────────────────────────────┐
-                                                                  v
-Claude project hooks -> validate -> allowlist -> MissionEvent -> in-memory store -> SSE
-                               reject content                            |
-                                                                         v
-                                              Runs / Compare / Decisions
-                                                + subagent projection
-```
+The catalog scans `~/.claude/skills` and only project roots the user explicitly trusted. It validates
+that resolved paths stay within the expected skills root and does not follow an escaping symlink.
+Malformed skills appear as actionable validation findings rather than disappearing.
 
-`shared/mission-event.ts` is the only lifecycle contract shared across the collector and browser.
-Raw hook objects stop at the validation boundary.
+Personal and project skills are separate installations. In the context of a trusted project, a
+same-name personal skill wins over the project skill. The UI shows the conflict, both locations,
+and the winner. Outside that project context, the personal skill remains effective. No content is
+merged automatically.
 
 ## Product areas
 
-### Runs
+- **Library:** sources, scope, validity, precedence, conflict, installed state, and rescan.
+- **Editor:** draft text, validation findings, immutable version history, and explicit promotion.
+- **Test Lab:** test-case presets, bounded runner state, transient trace, assertions, and final result.
+- **Compare:** side-by-side saved results with version/test provenance and assertion differences.
 
-Runs groups normalized events by hashed session identifier. Run detail explains lifecycle evidence,
-status, failures, and parent-child subagent activity. Relationships come from `agentId` and
-`parentAgentId`, never prompt or transcript content.
+## Runner boundary
 
-### Compare
+The server starts `claude -p` directly as a child process. It reuses the Claude CLI's existing
+authentication and supplies no API key. Every run has a fixed timeout, output limit, cancellation
+path, and tools-disabled configuration. Input is passed without shell interpolation. The runner
+captures structured progress where available, emits a small normalized event model over SSE, and
+produces one terminal outcome. A timeout, cancellation, spawn failure, or malformed event is a
+first-class terminal state.
 
-Compare selects two projected runs and presents status, duration, event count, tool failures,
-subagents, tokens, and cost. Seed fixtures may provide deterministic tokens and cost. Live values
-that the event contract cannot prove are labeled unavailable, not zero or estimated.
+The browser never starts processes or accesses skill files directly. The server validates all API
+input and owns catalog, filesystem, SQLite, and process I/O.
 
-### Decisions
+## Consistency and recovery
 
-Decisions is a local workshop queue. Seed entries and facilitator-injected scenarios exercise policy
-and interface behavior. Allow, deny, and clarification outcomes update browser state only; they do
-not call Claude, change settings, or grant real permissions.
-
-## Ownership boundaries
-
-- `scripts/doctor.mjs` diagnoses setup without printing settings content.
-- `scripts/workshop.mjs` runs diagnostics, installs owned project hooks, explains the two-terminal
-  workflow, and starts the app.
-- `scripts/connect-claude.mjs` and `scripts/disconnect-claude.mjs` merge and remove only owned
-  project entries while preserving unrelated settings.
-- `server/` owns loopback HTTP input, health/readiness, runtime validation, safe normalization,
-  bounded in-memory storage, and SSE.
-- `src/` owns accessible navigation, readiness presentation, seed fixtures, pure run/comparison/
-  subagent projections, and local simulated decision state.
-
-The privacy boundary precedes storage, logs, SSE, and UI. See [`privacy.md`](privacy.md). Hook
-failures are acknowledged or isolated quickly so the collector cannot block Claude Code.
-
-## Failure and recovery behavior
-
-- Collector unavailable: the browser renders seed data and readiness explains the failed check.
-- Hooks missing: workshop or `npm run connect:claude` can reinstall only the owned entries.
-- No first event: start an authenticated Claude CLI session from this repository.
-- SSE interruption: reconnect without losing the seeded experience.
-- Invalid input: reject it without logging the raw payload.
-- Port conflict: doctor distinguishes this app from an unrelated listener and reports recovery.
-
-## Deferred extension: Prometheus
-
-Prometheus polling is not implemented and is not in the attendee critical path. A future adapter
-would require an explicit aggregate allowlist, disabled content logs, privacy tests, and honest
-unavailable states. It must not expand `MissionEvent` with content-bearing fields.
+- Rescan files after external edits; filesystem state wins for installed content.
+- Before replacing an installed file, snapshot the previous valid content as an immutable version.
+- Write promotion through a temporary file and atomic rename where the platform permits.
+- Use SQLite transactions for linked version, test, assertion, and saved-result records.
+- On startup, mark abandoned running records interrupted without inventing a final result.
+- Do not reconstruct an installed skill from SQLite except through an explicit user recovery action.
 
 ## Intentionally omitted
 
-No database, authentication, cloud service, API key, deployment, Prometheus runtime, transcript
-parsing, terminal scraping, multi-user aggregation, production history, or real Claude permission
-control.
+Cursor skills, deployment, application authentication, cloud storage or sync, remote telemetry,
+multi-user collaboration, background schedules, and tool-enabled Claude test runs.

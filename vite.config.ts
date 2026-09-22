@@ -12,7 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: './tests/ui/setup.ts',
+    setupFiles: './tests/frontend/setup.ts',
     css: true,
   },
 });

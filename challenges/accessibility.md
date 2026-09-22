@@ -8,7 +8,7 @@ Improve one complete workflow for keyboard, focus, semantics, and status announc
 
 ## Build
 
-1. Choose setup readiness, Runs, Compare, or the simulated Decisions workflow.
+1. Choose Library, Editor, Test Lab, or Compare.
 2. Navigate it using only the keyboard and inspect its accessible names and landmarks.
 3. Fix the highest-impact problems: semantic controls, visible focus, logical order, labels, and
    announced asynchronous or status changes.
@@ -35,5 +35,5 @@ Run the focused accessibility test, manually repeat the keyboard workflow at 200
 
 ## Recovery and cleanup
 
-Use seed data if live events are unavailable. Remove temporary debugging attributes and restore the
-browser zoom after verification; no Claude hook change is needed.
+Use fake-runner fixtures if Claude is unavailable. Remove temporary debugging attributes and
+restore browser zoom after verification; no real CLI run is required.

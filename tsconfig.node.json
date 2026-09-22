@@ -13,5 +13,10 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "server/**/*.ts"]
+  "include": [
+    "vite.config.ts",
+    "app/domain/**/*.ts",
+    "app/backend/**/*.ts",
+    "app/entrypoints/server.ts"
+  ]
 }

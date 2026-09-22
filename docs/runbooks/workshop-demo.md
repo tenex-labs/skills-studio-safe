@@ -1,57 +1,42 @@
 # Workshop demo
 
-## Prerequisites
-
-- Node.js `^20.19.0 || >=22.12.0`
-- Dependencies installed and `npm run doctor` reviewed
-- Seed fallback checked in the presentation browser
-- Claude CLI installed and authenticated only if live proof is planned
+This flow presents Claude Skill Studio from discovery through promotion.
 
 ## Start
 
 ```bash
-npm run workshop
+npm install
+npm run dev
 ```
-
-Open the printed URL. Confirm collector and project-hook readiness. First-event readiness may still
-say waiting.
 
 ## Demo flow
 
-1. **Readiness:** explain collector, project hooks, and first-event evidence. Waiting is honest until
-   a supported live event is accepted.
-2. **Runs:** open seed and live run detail. Show lifecycle evidence, failure state, and subagent
-   relationships without content.
-3. **Compare:** select two runs. Contrast status, duration, events, tool failures, and subagents.
-   Point out fictional seed usage values and unavailable live tokens/cost.
-4. **Decisions:** inject a facilitator scenario, apply a simulated outcome, and state that it has no
-   effect on Claude permissions.
-5. **Extension:** assign one independent challenge from [`../../challenges/`](../../challenges/).
-6. **Optional live proof:** in a second terminal in this repository, run `claude` and complete one
-   small interaction. Authentication and a real CLI session are required.
+1. **Library:** show personal skills, then explicitly trust a prepared demo project and rescan.
+2. **Precedence:** open a same-name conflict and explain why the personal version wins.
+3. **Editor:** change a draft, run validation, and prove the installed file is unchanged.
+4. **Test Lab:** choose a preset and immutable version, run a bounded no-tools test, and distinguish
+   partial SSE trace from the final result.
+5. **Save:** save a completed result and explain its version/test provenance.
+6. **Compare:** compare two saved results and inspect assertion differences.
+7. **Promote:** preview scope and promote the approved draft; rescan to show the filesystem as
+   installed authority.
+8. **Extension:** assign one exercise from [`../../challenges/`](../../challenges/).
 
-## Expected evidence
+## Proof points
 
-- Runs, Compare, Decisions, and every challenge have a seed-data path.
-- Setup readiness tells attendees the next action.
-- Subagent projection uses safe parent-child identifiers.
-- Facilitator scenarios and outcomes are visibly simulated and local.
-- Live mode, if demonstrated, shows normalized metadata and no sensitive content.
-- Stopping the collector leaves Claude Code responsive.
+- Untrusted projects are neither scanned nor modified.
+- Draft, installed file, immutable version, active trace, and saved result are visibly distinct.
+- Claude authentication remains owned by the CLI and tools remain disabled.
+- The personal winner is explicit; the project skill is not overwritten or merged.
 
-## Recovery
+## Demo fallback
 
-- Doctor failure: follow its first actionable recovery and rerun it once.
-- Port conflict: stop the conflicting process or use seed fallback; do not call it this app.
-- Claude unavailable or unauthenticated: skip live proof and use seed runs.
-- Hooks missing: run `npm run connect:claude`, then start a new Claude session here.
-- Collector stops: keep teaching with seed data.
+Prepare fictional fixture skills and saved results. If Claude authentication, network, or usage
+limits block a live run, use the fake runner and clearly label it. If promotion fails, keep the
+draft and show the atomic-write error; do not edit the file manually during the demo.
 
 ## Cleanup
 
-```bash
-npm run disconnect:claude
-```
-
-Exit the Claude session and stop the workshop process with `Ctrl-C`. There is no deployment,
-database, or Prometheus process to clean up.
+Cancel active runs, stop the dev process, untrust the disposable demo project if the UI supports it,
+and remove only demo application data after backing up anything needed. Do not delete personal
+skills or a participant's database.

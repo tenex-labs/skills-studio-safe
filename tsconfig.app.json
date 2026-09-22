@@ -20,5 +20,5 @@
     "types": ["vite/client"],
     "jsx": "react-jsx"
   },
-  "include": ["src", "tests/ui"]
+  "include": ["app/domain", "app/frontend", "app/entrypoints/browser.tsx", "tests/frontend"]
 }

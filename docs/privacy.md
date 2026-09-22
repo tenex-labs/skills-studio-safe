@@ -1,48 +1,55 @@
-# Privacy contract
+# Target privacy and data contract
 
-Agent Mission Control uses allowlist construction, not capture-then-redact. A raw hook payload exists
-only long enough to validate approved fields and create a new safe object.
+Claude Skill Studio handles content by design: skill bodies, test prompts, and final model output.
+Privacy therefore depends on explicit purpose, local storage boundaries, redacted operational logs,
+and honest disclosure—not on claiming content is never processed.
 
-## Allowed metadata
+## Data classes
 
-- Timestamp
-- Hashed session, prompt, and agent identifiers
-- Supported event name and normalized event kind
-- Agent type
-- Coarse tool category
-- Success, failure, blocked, or completion status
-- Duration
-- Task status
-- Permission outcome
-- Sanitized repository label
+### Installed files
 
-## Rejected content
+Personal and trusted-project `SKILL.md` files remain at their original filesystem locations. The
+catalog reads them to validate and edit them. A project is not read until the user explicitly trusts
+its root.
 
-Do not store, log, stream, export, render, or place in error messages:
+### SQLite
 
-- Prompts or other user messages
-- Assistant messages
-- Source code or diffs
-- Tool arguments or results containing content
-- Shell commands
-- Raw file paths, repository URLs, or home-directory details
-- Environment variables
-- Secrets or credentials
-- Transcript contents or raw API bodies
+SQLite may contain trusted project roots, immutable skill-version content, test prompts, assertion
+definitions, runner settings, and final results the user chose to save. It must not contain Claude
+credentials, environment dumps, or automatic copies of partial traces.
 
-The collector never reads Claude transcript files.
+### Ephemeral traces
+
+Partial runner output is held in bounded memory and streamed to the active browser over loopback SSE.
+It is discarded when the run ends, is cancelled, or the server restarts. Trace payloads must not be
+written to general logs.
+
+### Saved final results
+
+A completed final response and assertion evidence become durable only through the save policy shown
+in Test Lab. Saved results are linked to immutable version and test-case identifiers and can be
+deleted without changing installed files.
+
+## External disclosure
+
+Tests invoke the locally installed `claude -p` and use its existing authentication. The selected
+skill text, test prompt, and normal CLI context are sent to Anthropic under the user's Claude CLI
+configuration. The Studio adds no cloud sync, analytics, hosted account, API key store, or remote
+telemetry. “Local application” does not mean model inference is offline.
 
 ## Required controls
 
-1. Treat inbound values as `unknown` and validate at the HTTP boundary.
-2. Map only known event names and finite status values.
-3. Hash identifiers and reduce repository data to a safe label.
-4. Construct a fresh `MissionEvent`; never spread or serialize the source payload.
-5. Test that representative forbidden fields are absent from storage, SSE, logs, and browser output.
+1. Bind the application server to loopback and restrict browser origins.
+2. Treat paths and API payloads as untrusted; canonicalize roots and reject traversal or symlink
+   escape.
+3. Require explicit project trust before scan, read, write, test, or promotion.
+4. Spawn `claude -p` without a shell, disable tools, enforce time/output limits, and support cancel.
+5. Never log skill bodies, prompts, final output, trace chunks, credentials, environment values, or
+   full home-directory paths.
+6. Parameterize SQLite access and keep database and backup files outside version control.
+7. Show whether final output will be saved, and never convert an interrupted trace into a result.
+8. Redact user-facing errors while retaining actionable categories such as timeout or CLI auth
+   failure.
 
-Seed data must be fictional and clearly labeled. Approval actions are simulated and must not change
-real Claude permissions. Facilitator scenarios must also remain local and must not be confused with
-hook input.
-
-Prometheus is not implemented. Any future metrics adapter requires a separate privacy review and
-must not weaken this contract.
+Backups contain the same sensitive content as SQLite. Store them with user-only permissions, never
+attach them to workshop submissions, and delete temporary restore copies after verification.

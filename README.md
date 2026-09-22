@@ -1,83 +1,89 @@
-# Agent Mission Control
+# Claude Skill Studio
 
-Agent Mission Control is a local workshop app for understanding coding-agent runs, subagents, and
-human decision points. From this repository, run:
+Claude Skill Studio is a local application for discovering, editing, validating, testing,
+and comparing Claude Code skills. It manages personal skills in `~/.claude/skills` and skills in
+explicitly trusted projects under `<project>/.claude/skills`. Cursor skills, deployment,
+application authentication, and cloud services are outside this cutover.
+
+## Install and start
+
+From this repository:
 
 ```bash
 npm install
-npm run workshop
+npm run dev
 ```
 
-`workshop` checks the machine, installs this repository's owned Claude hooks, and starts the UI and
-local collector. Open the URL it prints. In a second terminal, `cd` to this same repository and run:
+Then open the local URL printed by Vite. Run the full repository checks with:
 
 ```bash
-claude
+npm run preflight
 ```
 
-A successful setup shows the Runs, Compare, and Decisions navigation plus setup readiness for the
-collector, project hooks, and first live event. The app remains usable with clearly labeled seed
-data before a live event arrives. Proving the live path requires an authenticated Claude CLI session;
-the app does not authenticate Claude for you.
+## Product areas
 
-## Check before starting
+- **Library** catalogs installed personal and trusted-project skills and reports conflicts.
+- **Editor** supports a draft-test-promote loop without treating a draft as installed.
+- **Test Lab** stores reusable test cases and runs bounded, no-tools checks through `claude -p`.
+- **Compare** evaluates saved results across skill versions and test cases.
 
-The supported Node.js range is exactly `^20.19.0 || >=22.12.0`. For actionable checks without
-starting the app:
+The app uses the Claude CLI's existing authentication. It does not collect credentials, mint tokens,
+or add a second sign-in flow.
 
-```bash
-npm run doctor
-```
+## Personal and project skills
 
-Doctor reports Node and Claude CLI availability, required files, local port conflicts, repository
-scope, and whether the owned hooks are installed. It does not inspect or print credentials, prompts,
-transcripts, or full settings.
+The filesystem is the installed authority:
 
-## What is included
+- `~/.claude/skills/<name>/SKILL.md` is a personal installed skill.
+- `<trusted-project>/.claude/skills/<name>/SKILL.md` is a project installed skill.
+- An untrusted project is never scanned or modified.
+- In a trusted project context, a personal skill with the same name takes precedence over the
+  project skill. The Library shows both sources and the effective winner; it does not silently
+  merge them.
 
-- Runs and run detail derived from deterministic seed data and safe live lifecycle metadata
-- Compare for two runs, with unavailable live values labeled instead of invented
-- Parent-child subagent projection from hashed agent relationships
-- Decisions with local facilitator scenario injection and simulated outcomes only
-- Persistent setup readiness and seed fallback
-- An allowlist privacy boundary before in-memory storage and SSE
-- Independent workshop challenges under [`challenges/`](challenges/)
+Trust is an explicit local choice recorded by the application. Trusting one project does not trust
+its parent, siblings, remotes, or future clones.
 
-Prometheus is not implemented and is not required for attendees. It is only a possible future
-extension.
+## Draft, test, promote
 
-## Commands
+1. Select an installed skill or start a draft.
+2. Edit and validate the draft without changing the installed file.
+3. Run one or more saved test cases through bounded `claude -p` processes with tools disabled.
+4. Inspect the final result, assertions, timing, and any available partial trace.
+5. Compare saved results when useful.
+6. Promote an approved draft by writing the chosen personal or trusted-project `SKILL.md`.
 
-```bash
-npm run workshop          # normal attendee start
-npm run doctor            # diagnose setup without starting
-npm run dev               # UI and collector without setup automation
-npm run connect:claude    # install only owned project hooks
-npm run disconnect:claude # remove only owned project hooks
-npm run preflight         # format, lint, typecheck, tests, and build
-npm test
-npm run build
-```
+Promotion creates an immutable version record before replacing an existing installed file. A saved
+result remains linked to the exact version and test case that produced it.
 
-## Project scope and safety
+## Local data and privacy
 
-The hooks are project-local and apply to Claude sessions started from this repository. They do not
-grant permissions, alter user-level Claude settings, or make this app a production control plane.
-Decision actions and facilitator scenarios are local simulations; they cannot allow or deny a real
-Claude action.
+Application state lives under the user's standard per-user application-data location, not this
+checkout. On macOS the database is under `~/Library/Application Support/Claude Skill Studio/`.
 
-The collector keeps approved metadata only. It rejects prompts, messages, source code, diffs, tool
-arguments, commands, raw paths, environment values, secrets, and transcripts. A stopped or missing
-collector must not block Claude Code.
+The four data classes are deliberately separate:
 
-## Cleanup
+1. **Installed files** — authoritative current skill text on the filesystem.
+2. **SQLite records** — immutable skill versions, test cases, and completed final results,
+   plus small catalog metadata such as trusted project roots.
+3. **Ephemeral traces** — partial runner output held only for the active run and delivered over SSE;
+   it is not durable history.
+4. **Saved final results** — completed output and assertion evidence in SQLite.
 
-Stop `npm run workshop` with `Ctrl-C`, exit the second-terminal Claude session, then remove this
-repository's owned hooks:
+Skill text, test prompts, and model output stay local to the machine except for the normal data sent
+by the existing `claude -p` CLI session to Anthropic. The Studio adds no cloud sync, analytics,
+deployment, or remote telemetry. See [`docs/privacy.md`](docs/privacy.md) for the privacy boundary.
 
-```bash
-npm run disconnect:claude
-```
+## Recovery
 
-The app has no database or deployed service to remove. See [`docs/README.md`](docs/README.md) for
-architecture, privacy, setup, demo, troubleshooting, and challenge guidance.
+- If the catalog looks stale, rescan the filesystem; do not reconstruct installed skills from the
+  database.
+- If a promoted file is wrong, restore the previous immutable version through an explicit recovery
+  action and write it back to the intended scope.
+- Back up SQLite with its documented backup procedure while the app is stopped or through the
+  implementation's consistent backup command.
+- If a run is interrupted, discard the partial trace. Completed terminal results belong in history.
+- Never trust or edit a project merely because it appears in recent files.
+
+See [`docs/README.md`](docs/README.md) for architecture, runbooks, conventions, and workshop
+exercises.

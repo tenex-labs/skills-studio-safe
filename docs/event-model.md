@@ -1,57 +1,38 @@
-# Event model
+# Target runner event model
 
-Every lifecycle source normalizes into one safe browser-facing shape:
+The runner converts bounded child-process progress into one browser-facing shape. Names may be
+adjusted during integration, but the persistence boundary must remain:
 
 ```ts
-type MissionEvent = {
+type RunnerEvent = {
   id: string;
+  runId: string;
+  sequence: number;
   timestamp: string;
-  sessionId: string;
-  promptId?: string;
-  agentId?: string;
-  parentAgentId?: string;
-  agentType?: string;
-  kind: 'session' | 'prompt' | 'tool' | 'permission' | 'subagent' | 'task' | 'compact' | 'stop';
-  action: string;
-  status: 'started' | 'succeeded' | 'failed' | 'blocked' | 'completed';
-  toolCategory?: string;
-  durationMs?: number;
-  repository?: string;
+  kind: 'started' | 'progress' | 'assertion' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
+  message?: string;
+  assertionId?: string;
+  assertionStatus?: 'passed' | 'failed';
 };
 ```
 
 ## Invariants
 
 - `timestamp` is an ISO 8601 string.
-- External session, prompt, and agent identifiers are hashed before storage.
-- `repository` is a sanitized label, never a raw path or remote URL.
-- `toolCategory` is a coarse category, never a tool argument or command.
-- `action` comes from a finite adapter mapping; it is not copied from free-form content.
-- Optional fields are absent when unknown. Placeholder content is not invented.
-- Normalization produces a new object and discards the raw payload.
+- `runId` is server-issued and `sequence` increases within a run.
+- `kind` is finite; exactly one terminal event ends a run.
+- `message` is bounded display output, not an operational log field.
+- Events may be lost on disconnect or restart. SSE is not a history API.
+- Tools are disabled; tool lifecycle events are not part of this model.
+- Unknown CLI event shapes never pass through wholesale.
 
 ## Source mapping
 
-Seed fixtures directly construct valid events. Hook adapters validate supported lifecycle events and
-map approved metadata into this shape. Setup readiness and facilitator scenarios are separate local
-models; they are not lifecycle events and must not be forced into `MissionEvent`.
+The active trace is ephemeral. On successful completion, the server constructs a separate final
+result containing terminal status, bounded final output, timings, assertion outcomes, and references
+to the immutable skill version, test case, model/configuration, and runner version. Saving that final
+result is an explicit database operation. Progress events themselves are not copied into SQLite.
 
-The UI derives runs, run detail, comparison evidence, counts, failures, and subagent relationships
-from this contract. `agentId` identifies an agent and `parentAgentId` links a child to its parent;
-missing or unknown parents must remain explicit rather than guessed from content. Source-specific
-logic stays at input boundaries.
-
-Seed run fixtures may contain fictional tokens and cost for comparison exercises. Live events do not
-contain those metrics, so live comparison must label them unavailable. Prometheus is deferred and
-does not enrich the shipped event stream.
-
-## Supported lifecycle families
-
-Session start/end, prompt submission metadata, tool start/success/failure, permission request/denial,
-subagent start/stop, task creation/completion, pre/post compaction, and stop.
-
-## Not represented
-
-Setup diagnostics, hook installation state, SSE connection state, facilitator scenario text,
-simulated decision outcomes, prompts, code, commands, tool arguments, raw paths, transcripts, tokens,
-and cost are not `MissionEvent` fields.
+Spawn errors, CLI authentication errors, timeout, cancellation, output-limit termination, and
+malformed output remain distinct. A browser disconnect does not cancel a run unless the user asks;
+it also does not guarantee trace replay.
