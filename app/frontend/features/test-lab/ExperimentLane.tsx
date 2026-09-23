@@ -197,16 +197,6 @@ export function ExperimentLane({
         </div>
         <pre>{output || 'Run this configuration to see the assembled response.'}</pre>
       </div>
-      {run && run.assertions.length > 0 && (
-        <ul className="assertion-list" aria-label={`${label} assertions`}>
-          {run.assertions.map((assertion) => (
-            <li key={assertion.label} data-passed={assertion.passed}>
-              <strong>{assertion.passed ? 'Pass' : 'Fail'}</strong>
-              <span>{assertion.label}</span>
-            </li>
-          ))}
-        </ul>
-      )}
       <details className="trace-details">
         <summary>Trace details · {diagnosticTraces.length} events</summary>
         {diagnosticTraces.length ? (

@@ -1,11 +1,9 @@
 import type {
   LaunchTestInput,
-  NewSkillTestCase,
   SkillFile,
   SkillPackage,
   SkillScope,
   SkillSummary,
-  SkillTestCase,
   SkillTestRun,
   SkillTestTrace,
   SkillVersion,
@@ -18,6 +16,8 @@ export interface StudioApi {
   readiness(): Promise<StudioReadiness>;
   projects(): Promise<TrustedProject[]>;
   registerProject(input: { label: string; path: string }): Promise<TrustedProject>;
+  /** Forgets a trusted project and the versions and runs Studio saved for it. */
+  forgetProject(id: string): Promise<void>;
   pickProject(): Promise<{ label: string; path: string }>;
   startClaudeLogin(): Promise<{ started: boolean }>;
   catalog(): Promise<SkillSummary[]>;
@@ -33,8 +33,6 @@ export interface StudioApi {
     skillId: string,
     input: { label: string; note?: string; files: SkillFile[]; baseRevision: string },
   ): Promise<SkillVersion>;
-  testCases(skillId: string): Promise<SkillTestCase[]>;
-  createTestCase(skillId: string, input: NewSkillTestCase): Promise<SkillTestCase>;
   testRuns(skillId: string): Promise<SkillTestRun[]>;
   launchTest(input: LaunchTestInput): Promise<SkillTestRun>;
   testRun(id: string): Promise<SkillTestRun>;
@@ -66,13 +64,16 @@ async function mutationCapability(): Promise<string> {
   return capability;
 }
 
-async function request<T>(path: string, init?: { method: 'POST'; body: unknown }): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: { method: 'POST'; body: unknown } | { method: 'DELETE' },
+): Promise<T> {
   const headers: Record<string, string> = { ...jsonHeaders };
   if (init) headers['X-Studio-Capability'] = await mutationCapability();
   const response = await fetch(`${apiRoot}${path}`, {
     method: init?.method ?? 'GET',
     headers,
-    ...(init ? { body: JSON.stringify(init.body) } : {}),
+    ...(init && 'body' in init ? { body: JSON.stringify(init.body) } : {}),
   });
   if (!response.ok) {
     // The server returns safe, user-facing messages for validation and not-found errors.
@@ -80,7 +81,7 @@ async function request<T>(path: string, init?: { method: 'POST'; body: unknown }
     const message = typeof body?.error === 'string' ? body.error : 'Studio request failed.';
     throw new StudioApiError(response.status, message);
   }
-  return (await response.json()) as T;
+  return (response.status === 204 ? undefined : await response.json()) as T;
 }
 
 const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: 'POST', body });
@@ -94,6 +95,8 @@ export const studioApi: StudioApi = {
     post<{ project: TrustedProject }>('/projects', { ...input, trust: true }).then(
       ({ project }) => project,
     ),
+  forgetProject: (id) =>
+    request<unknown>(`/projects/${segment(id)}`, { method: 'DELETE' }).then(() => undefined),
   pickProject: () =>
     post<{ project: { label: string; path: string } }>('/projects/pick').then(
       ({ project }) => project,
@@ -111,14 +114,6 @@ export const studioApi: StudioApi = {
   createVersion: (skillId, input) =>
     post<{ version: SkillVersion }>(`/skills/${segment(skillId)}/drafts`, input).then(
       ({ version }) => version,
-    ),
-  testCases: (skillId) =>
-    request<{ testCases: SkillTestCase[] }>(`/skills/${segment(skillId)}/test-cases`).then(
-      ({ testCases }) => testCases,
-    ),
-  createTestCase: (skillId, input) =>
-    post<{ testCase: SkillTestCase }>(`/skills/${segment(skillId)}/test-cases`, input).then(
-      ({ testCase }) => testCase,
     ),
   testRuns: (skillId) =>
     request<{ testRuns: SkillTestRun[] }>(`/test-runs?skillId=${segment(skillId)}`).then(

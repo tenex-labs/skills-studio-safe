@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -187,8 +187,26 @@ describe('SkillCatalog mutations', () => {
     await studio.discover();
 
     expect(studio.removeProject(trusted.id)).toBe(true);
-    expect(studio.listProjects()).toEqual([]);
+    expect(await studio.listProjects()).toEqual([]);
     expect(await studio.discover()).toEqual([]);
     expect(studio.removeProject(trusted.id)).toBe(false);
+  });
+
+  it('reports a moved project as unavailable and counts skills from disk', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skill-moved-'));
+    const project = join(root, 'project');
+    await skill(join(project, '.claude', 'skills'), 'one', 'One');
+    await skill(join(project, '.claude', 'skills'), 'two', 'Two');
+    const studio = catalog(join(root, 'personal'));
+    const trusted = await studio.registerProject({ path: project, trust: true });
+    expect(trusted).toMatchObject({ available: true, skillCount: 2 });
+    await studio.discover();
+
+    await rename(project, join(root, 'moved'));
+
+    expect(await studio.listProjects()).toEqual([
+      expect.objectContaining({ id: trusted.id, available: false, skillCount: 0 }),
+    ]);
+    expect(await studio.discover()).toEqual([]);
   });
 });

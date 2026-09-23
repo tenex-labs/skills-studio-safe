@@ -15,7 +15,6 @@ describe('TestLabView', () => {
         projects={[]}
         catalogState="ready"
         versions={[]}
-        testCases={[]}
         runs={[]}
         tracesByRun={{}}
         readiness={{
@@ -27,7 +26,6 @@ describe('TestLabView', () => {
         demoMode={false}
         onLaunch={vi.fn()}
         onCancel={vi.fn()}
-        onSaveTestCase={vi.fn()}
         onReauthenticate={vi.fn()}
         onSkillChange={onSkillChange}
       />,
@@ -46,7 +44,6 @@ describe('TestLabView', () => {
         projects={[]}
         catalogState="ready"
         versions={demoVersions}
-        testCases={[]}
         runs={[
           {
             id: 'failed-run',
@@ -70,7 +67,6 @@ describe('TestLabView', () => {
         demoMode={false}
         onLaunch={vi.fn()}
         onCancel={vi.fn()}
-        onSaveTestCase={vi.fn()}
         onReauthenticate={vi.fn()}
         onSkillChange={vi.fn()}
       />,

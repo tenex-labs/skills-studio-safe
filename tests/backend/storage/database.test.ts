@@ -94,7 +94,6 @@ describe('StudioDatabase', () => {
         id: 'project-1',
         label: 'Project',
         path: '/canonical/project',
-        skillCount: 0,
         trustedAt: '2026-09-22T12:00:00.000Z',
       },
     ]);

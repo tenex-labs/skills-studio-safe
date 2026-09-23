@@ -8,6 +8,7 @@ import type {
   SkillPackage,
   SkillSummary,
   SkillVersion,
+  StoredProject,
   TrustedProject,
 } from '../../domain/index.ts';
 import { RevisionConflictError, StudioNotFoundError, StudioValidationError } from '../errors.ts';
@@ -193,20 +194,35 @@ export class SkillCatalog {
     const existing = this.database
       .listTrustedProjects()
       .find(({ path: registeredPath }) => registeredPath === canonical);
-    if (existing) return existing;
-    const project: TrustedProject = {
+    if (existing) return this.describeProject(existing);
+    const project: StoredProject = {
       id: `project_${hash(canonical).slice(0, 24)}`,
       label: input.label?.trim() || basename(canonical),
       path: canonical,
-      skillCount: 0,
       trustedAt: this.now(),
     };
     this.database.saveTrustedProject(project);
-    return project;
+    return this.describeProject(project);
   }
 
-  listProjects(): TrustedProject[] {
-    return this.database.listTrustedProjects();
+  async listProjects(): Promise<TrustedProject[]> {
+    return Promise.all(
+      this.database.listTrustedProjects().map((project) => this.describeProject(project)),
+    );
+  }
+
+  // The stored path can go stale when a folder is moved or deleted, so check it on every read and
+  // count skills from disk rather than from catalog rows left by earlier scans.
+  private async describeProject(project: StoredProject): Promise<TrustedProject> {
+    const available = await stat(project.path).then(
+      (entry) => entry.isDirectory(),
+      () => false,
+    );
+    const skillCount = available
+      ? (await this.discoverRoot(join(project.path, '.claude', 'skills'), 'project', project.id))
+          .length
+      : 0;
+    return { ...project, available, skillCount };
   }
 
   async createSkill(input: CreateSkillInput): Promise<SkillPackage> {

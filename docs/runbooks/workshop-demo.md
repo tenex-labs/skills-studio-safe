@@ -20,12 +20,11 @@ one of your personal skills. Confirm `claude` is signed in.
    Code uses the personal skill.
 3. **Editor:** open a skill, change a line, preview it, and save. Show the new entry in the
    version timeline, then show that the installed `SKILL.md` is unchanged.
-4. **Test Lab:** choose the skill, enter a prompt, and click **Save as test case** with one phrase
-   the output must contain.
+4. **Test Lab:** choose the skill and write a prompt you would really give Claude.
 5. **Compare:** give Configuration A the saved version and Configuration B the filesystem
    baseline, or vary the model. Click **Run both** and watch the output stream.
-6. **Evidence:** read the aligned table: status, duration, tokens, cost, and assertions. Point out
-   that a run can pass while an assertion fails.
+6. **Evidence:** read the aligned table: status, duration, tokens, and cost. Open **Trace details**
+   to show the live events, and point out that they are not saved.
 7. **Extension:** assign one exercise from [`../../challenges/`](../../challenges/).
 
 ## What to point out
@@ -37,9 +36,9 @@ one of your personal skills. Confirm `claude` is signed in.
 ## If a live run is not possible
 
 Stop the API server and reload. The UI switches to a labeled demo catalog whose runs are simulated,
-so you can still demonstrate test cases and the comparison table.
+so you can still demonstrate the comparison table.
 
 ## Cleanup
 
-Cancel active runs and stop the dev server. The disposable project stays trusted in the database; to
-forget it, reset local data as described in [local development](local-development.md).
+Cancel active runs and stop the dev server. To stop scanning the disposable project, select it in
+Library and choose **Forget project**.

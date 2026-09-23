@@ -4,7 +4,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    // A fixed, uncommon port keeps Studio from colliding with other Vite apps. The API only accepts
+    // browser requests from this origin, so fail loudly instead of drifting to another port.
+    port: 4320,
+    strictPort: true,
     proxy: {
       '/api': 'http://127.0.0.1:4319',
     },

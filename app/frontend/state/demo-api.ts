@@ -1,11 +1,10 @@
 import {
-  evaluateAssertions,
   type SkillTestRun,
   type SkillTestTrace,
   type SkillTestTraceInput,
   type TerminalTestStatus,
 } from '../../domain/index';
-import { demoProjects, demoRuns, demoSkills, demoTestCases, demoVersions } from '../fixtures/demo';
+import { demoProjects, demoRuns, demoSkills, demoVersions } from '../fixtures/demo';
 import { unavailableReadiness } from '../model/skill-view-model';
 import type { StudioApi } from './api';
 
@@ -22,7 +21,6 @@ function unavailable(): Promise<never> {
 export function createDemoApi(): StudioApi {
   const skills = structuredClone(demoSkills);
   const versions = structuredClone(demoVersions);
-  const testCases = structuredClone(demoTestCases);
   const runs = structuredClone(demoRuns);
   const listeners = new Map<string, (trace: SkillTestTrace) => void>();
   const timers = new Map<string, number>();
@@ -39,8 +37,6 @@ export function createDemoApi(): StudioApi {
       run.output = `Demo response from ${run.model}. No model was called.`;
       emit(run.id, { kind: 'assistant', text: run.output });
       run.durationMs = DEMO_RUN_MS;
-      const testCase = testCases.find(({ id }) => id === run.testCaseId);
-      run.assertions = evaluateAssertions(testCase, run.output);
     }
     run.status = status;
     run.finishedAt = new Date().toISOString();
@@ -56,6 +52,7 @@ export function createDemoApi(): StudioApi {
     readiness: async () => unavailableReadiness,
     projects: async () => structuredClone(demoProjects),
     registerProject: unavailable,
+    forgetProject: unavailable,
     pickProject: unavailable,
     startClaudeLogin: unavailable,
     catalog: async () => structuredClone(skills),
@@ -83,18 +80,6 @@ export function createDemoApi(): StudioApi {
       skill.files = input.files;
       skill.revision = version.revision;
       return structuredClone(version);
-    },
-    testCases: async (skillId) =>
-      structuredClone(testCases.filter((testCase) => testCase.skillId === skillId)),
-    async createTestCase(skillId, input) {
-      const testCase = {
-        ...input,
-        id: newId('case'),
-        skillId,
-        createdAt: new Date().toISOString(),
-      };
-      testCases.push(testCase);
-      return structuredClone(testCase);
     },
     testRuns: async (skillId) => structuredClone(runs.filter((run) => run.skillId === skillId)),
     async launchTest(input) {

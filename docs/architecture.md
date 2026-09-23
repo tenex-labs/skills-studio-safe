@@ -20,7 +20,7 @@ owns every filesystem, database, and process operation; the browser only calls i
 | Installed skill | `SKILL.md` packages on disk | You, other tools, and Library's **New skill** only    |
 | Catalog rows    | SQLite `skills`             | Every scan; a cache of the last scan, never restored  |
 | Versions        | SQLite `skill_versions`     | A filesystem baseline per scan, plus each Editor save |
-| Test cases      | SQLite `test_cases`         | Test Lab **Save as test case**                        |
+| Test cases      | SQLite `test_cases`         | The API only; Test Lab does not expose them yet       |
 | Run records     | SQLite `test_runs`          | Saved at launch, updated once when the run finishes   |
 | Traces          | Runner memory               | The runner, while a run is active                     |
 
@@ -29,6 +29,10 @@ from. If that base revision is unknown to Studio, the save is rejected with a re
 instead of creating a version with no parent.
 
 ## Catalog and precedence
+
+Trusted projects are stored by path. Every time the project list is read, each path is checked on
+disk: a moved or deleted folder is reported as unavailable, and skill counts come from the folder
+rather than from earlier scans. To follow a moved project, forget it and trust the new location.
 
 The catalog scans `~/.claude/skills` and the `.claude/skills` folder of each trusted project. It
 resolves real paths and skips any package or file that escapes its root through a symlink.
@@ -80,6 +84,7 @@ unreachable. Views receive data and callbacks as props and do not fetch on their
 
 ## Not built
 
-Restoring a version over an installed skill, deleting versions or runs, removing a trusted project
-from the UI (the API supports it), live validation while typing, and run history in Test Lab.
+Restoring a version over an installed skill, deleting individual versions or runs, output checks
+(test cases) in Test Lab, live validation while typing, and run history in Test Lab. Forgetting a
+trusted project deletes its skills' versions and runs along with it.
 Cursor skills, deployment, app authentication, cloud sync, and telemetry are out of scope.

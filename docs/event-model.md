@@ -32,8 +32,9 @@ type SkillTestTrace = { id: string; timestamp: string } & (
 ## Status versus assertions
 
 `status` describes the Claude process: `passed` means it exited cleanly with a successful result.
-Assertions from a test case are evaluated once, against the final output, and stored separately in
-`run.assertions`. A run can pass while one of its assertions fails.
+When a run is launched with a test case (API only for now), its assertions are evaluated once,
+against the final output, and stored separately in `run.assertions`. A run can pass while one of
+its assertions fails.
 
 ## What gets saved
 

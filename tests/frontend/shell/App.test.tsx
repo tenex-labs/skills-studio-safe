@@ -82,45 +82,17 @@ describe('Claude Skill Studio', () => {
     expect(screen.getByText('Working copy clean')).toBeInTheDocument();
   });
 
-  it('runs a demo test case and reports assertions separately from run status', async () => {
+  it('runs both configurations in demo mode and shows final results', async () => {
     const user = renderOffline();
     await openDemoSkill(user);
     await user.click(screen.getByRole('link', { name: 'Test Lab' }));
 
-    await user.click(screen.getByRole('button', { name: /Test case/ }));
-    await user.click(screen.getByRole('option', { name: /Find a null handling bug/ }));
-    expect(screen.getByLabelText('Prompt')).toHaveValue(
-      'Review a change that dereferences an optional user profile.',
-    );
+    await user.type(screen.getByRole('textbox', { name: 'Prompt' }), 'Review this change.');
     await user.click(screen.getByRole('button', { name: 'Run both' }));
 
     await waitFor(() => expect(within(lane('A')).getByRole('status')).toHaveTextContent('passed'));
-    const assertions = within(lane('A')).getByRole('list', { name: 'Configuration A assertions' });
-    expect(within(assertions).getByText('Output contains "profile"')).toBeInTheDocument();
-    expect(within(assertions).getByText('Fail')).toBeInTheDocument();
-    const comparison = screen.getByRole('region', { name: 'Aligned run metadata' });
-    expect(within(comparison).getAllByText('1/2 passed')).toHaveLength(2);
-  });
-
-  it('saves the current prompt as a test case', async () => {
-    const user = renderOffline();
-    await openDemoSkill(user);
-    await user.click(screen.getByRole('link', { name: 'Test Lab' }));
-
-    await user.type(screen.getByLabelText('Prompt'), 'Review a rename.');
-    await user.click(screen.getByRole('button', { name: 'Save as test case' }));
-    const dialog = screen.getByRole('dialog', { name: 'Save as test case' });
-    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Rename');
-    await user.type(
-      within(dialog).getByRole('textbox', { name: 'Output must contain' }),
-      'rename, callers',
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Save test case' }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'Save as test case' })).not.toBeInTheDocument(),
-    );
-    expect(screen.getByRole('button', { name: /Test case/ })).toHaveTextContent('Rename');
+    expect(within(lane('B')).getByRole('status')).toHaveTextContent('passed');
+    expect(within(lane('A')).getByText(/Demo response from sonnet/)).toBeInTheDocument();
   });
 
   it('streams two live runs and shows each final result', async () => {
@@ -157,7 +129,6 @@ describe('Claude Skill Studio', () => {
         return jsonResponse({ skill: demoSkills[0] });
       }
       if (path.endsWith('/versions')) return jsonResponse({ versions: demoVersions });
-      if (path.endsWith('/test-cases')) return jsonResponse({ testCases: [] });
       if (path.startsWith('/api/studio/test-runs?')) return jsonResponse({ testRuns: [] });
       if (path === '/api/studio/test-runs' && method === 'POST') {
         runNumber += 1;

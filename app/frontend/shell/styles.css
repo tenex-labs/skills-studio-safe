@@ -990,14 +990,23 @@ label > textarea {
 
 .shared-input-grid {
   display: grid;
-  grid-template-columns: minmax(180px, 0.55fr) minmax(180px, 0.55fr) minmax(320px, 1.6fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 10px;
   padding: 10px 12px 12px;
 }
 
-.shared-input-grid textarea {
-  min-height: 74px;
+.prompt-field {
+  grid-column: 1 / -1;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.prompt-field textarea {
+  min-height: 200px;
+  padding: 14px 16px;
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .experiment-grid {
@@ -1140,29 +1149,6 @@ label > textarea {
   font: inherit;
   line-height: 1.55;
   white-space: pre-wrap;
-}
-
-.assertion-list {
-  margin: 0 10px 8px;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.assertion-list li {
-  display: grid;
-  grid-template-columns: 40px 1fr;
-  gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--line);
-}
-
-.assertion-list strong {
-  color: var(--success);
-}
-
-.assertion-list li[data-passed='false'] strong {
-  color: var(--danger);
 }
 
 .trace-details {

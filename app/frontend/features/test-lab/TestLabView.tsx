@@ -1,13 +1,11 @@
-import { KeyRound, Play, Save } from 'lucide-react';
+import { KeyRound, Play } from 'lucide-react';
 import { useState } from 'react';
 
 import {
   isTerminalStatus,
   type LaunchTestInput,
-  type NewSkillTestCase,
   type SkillPackage,
   type SkillSummary,
-  type SkillTestCase,
   type SkillTestRun,
   type SkillTestTrace,
   type SkillVersion,
@@ -15,84 +13,17 @@ import {
   type TrustedProject,
 } from '../../../domain/index';
 import {
-  formatAssertions,
   formatCost,
   formatDuration,
   formatTokens,
-  parseList,
   type LoadState,
 } from '../../model/skill-view-model';
-import { EmptyState, Modal, PageHeading, StateText } from '../../ui/components';
+import { EmptyState, PageHeading, StateText } from '../../ui/components';
 import { SelectMenu } from '../../ui/SelectMenu';
 import { ExperimentLane } from './ExperimentLane';
 import { defaultLaneConfig, toolPresetLabel, type LaneConfig } from './lane-options';
 
 type LaneKey = 'left' | 'right';
-
-function SaveTestCaseModal({
-  prompt,
-  onSave,
-  onClose,
-}: {
-  prompt: string;
-  onSave: (input: NewSkillTestCase) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [contains, setContains] = useState('');
-  const [excludes, setExcludes] = useState('');
-  const [error, setError] = useState('');
-
-  return (
-    <Modal
-      title="Save as test case"
-      confirmLabel="Save test case"
-      confirmDisabled={!name.trim()}
-      onClose={onClose}
-      onConfirm={() => {
-        setError('');
-        void onSave({
-          name: name.trim(),
-          prompt,
-          expectedContains: parseList(contains),
-          expectedExcludes: parseList(excludes),
-        }).catch((reason: unknown) =>
-          setError(reason instanceof Error ? reason.message : 'The test case was not saved.'),
-        );
-      }}
-    >
-      <p>
-        Saves the current prompt with expectations. Runs that use this test case check the final
-        output against them.
-      </p>
-      <label>
-        Name
-        <input autoFocus value={name} onChange={(event) => setName(event.target.value)} />
-      </label>
-      <label>
-        Output must contain
-        <textarea
-          value={contains}
-          placeholder="One phrase per line or comma separated"
-          onChange={(event) => setContains(event.target.value)}
-        />
-      </label>
-      <label>
-        Output must not contain
-        <textarea
-          value={excludes}
-          placeholder="One phrase per line or comma separated"
-          onChange={(event) => setExcludes(event.target.value)}
-        />
-      </label>
-      {error && (
-        <p className="notice warning" role="alert">
-          {error}
-        </p>
-      )}
-    </Modal>
-  );
-}
 
 export function TestLabView({
   skill,
@@ -100,14 +31,12 @@ export function TestLabView({
   projects,
   catalogState,
   versions,
-  testCases,
   runs,
   tracesByRun,
   readiness,
   demoMode,
   onLaunch,
   onCancel,
-  onSaveTestCase,
   onReauthenticate,
   onSkillChange,
 }: {
@@ -116,21 +45,17 @@ export function TestLabView({
   projects: TrustedProject[];
   catalogState: LoadState;
   versions: SkillVersion[];
-  testCases: SkillTestCase[];
   runs: SkillTestRun[];
   tracesByRun: Record<string, SkillTestTrace[]>;
   readiness: StudioReadiness;
   demoMode: boolean;
   onLaunch: (input: Omit<LaunchTestInput, 'skillId'>) => Promise<SkillTestRun>;
   onCancel: (id: string) => Promise<void>;
-  onSaveTestCase: (input: NewSkillTestCase) => Promise<SkillTestCase>;
   onReauthenticate: () => Promise<void>;
   onSkillChange: (id: string) => Promise<SkillPackage | undefined>;
 }) {
   const [prompt, setPrompt] = useState('');
-  const [testCaseId, setTestCaseId] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [saveCaseOpen, setSaveCaseOpen] = useState(false);
   const [launchError, setLaunchError] = useState('');
   const [configs, setConfigs] = useState<Record<LaneKey, LaneConfig>>(() => ({
     left: defaultLaneConfig(versions[0]?.id ?? '', 'sonnet'),
@@ -154,7 +79,6 @@ export function TestLabView({
   };
   const leftRun = laneRun('left');
   const rightRun = laneRun('right');
-  const selectedCase = testCases.find(({ id }) => id === testCaseId);
   const claudeReady = readiness.claude.available && readiness.claude.authenticated;
   const canRun = Boolean(skill && prompt.trim()) && (demoMode || claudeReady);
   const anyRunning = [leftRun, rightRun].some((run) => run && !isTerminalStatus(run.status));
@@ -163,12 +87,6 @@ export function TestLabView({
     !loginCompleted &&
     [leftRun, rightRun].some((run) => run?.output?.includes('OAuth access token has expired'));
 
-  const chooseTestCase = (id: string) => {
-    setTestCaseId(id);
-    const testCase = testCases.find((candidate) => candidate.id === id);
-    if (testCase) setPrompt(testCase.prompt);
-  };
-
   const launchLane = async (lane: LaneKey) => {
     const config = configs[lane];
     setLaunchError('');
@@ -176,8 +94,6 @@ export function TestLabView({
     try {
       const run = await onLaunch({
         versionId: config.versionId,
-        // A test case applies only while the prompt still matches it.
-        testCaseId: selectedCase?.prompt === prompt ? selectedCase.id : undefined,
         prompt,
         model: config.model,
         projectId: projectId || undefined,
@@ -214,7 +130,6 @@ export function TestLabView({
     ['Duration', formatDuration(leftRun?.durationMs), formatDuration(rightRun?.durationMs)],
     ['Tokens', formatTokens(leftRun), formatTokens(rightRun)],
     ['Cost', formatCost(leftRun), formatCost(rightRun)],
-    ['Assertions', formatAssertions(leftRun), formatAssertions(rightRun)],
   ];
 
   const skillOptions = skills.map((item) => ({
@@ -323,26 +238,14 @@ export function TestLabView({
             <h2 id="shared-input-title">Shared test input</h2>
             <span>Runs two headless Claude Code instances with the same prompt and workspace</span>
           </div>
-          <div className="button-row">
-            <button
-              className="button secondary"
-              disabled={!prompt.trim()}
-              onClick={() => setSaveCaseOpen(true)}
-            >
-              <Save size={17} aria-hidden="true" />
-              Save as test case
-            </button>
-            <button
-              className="button primary"
-              disabled={
-                !canRun || anyRunning || !configs.left.versionId || !configs.right.versionId
-              }
-              onClick={() => void Promise.all([launchLane('left'), launchLane('right')])}
-            >
-              <Play size={17} aria-hidden="true" />
-              Run both
-            </button>
-          </div>
+          <button
+            className="button primary"
+            disabled={!canRun || anyRunning || !configs.left.versionId || !configs.right.versionId}
+            onClick={() => void Promise.all([launchLane('left'), launchLane('right')])}
+          >
+            <Play size={17} aria-hidden="true" />
+            Run both
+          </button>
         </div>
         <div className="shared-input-grid">
           <SelectMenu
@@ -367,34 +270,15 @@ export function TestLabView({
             ]}
             onChange={setProjectId}
           />
-          <SelectMenu
-            label="Test case"
-            value={testCaseId}
-            placeholder="No test case"
-            options={[
-              { value: '', label: 'No test case', description: 'Free-form prompt' },
-              ...testCases.map((testCase) => ({
-                value: testCase.id,
-                label: testCase.name,
-                description: `${testCase.expectedContains.length + testCase.expectedExcludes.length} expectations`,
-              })),
-            ]}
-            onChange={chooseTestCase}
-          />
-          <label>
+          <label className="prompt-field">
             Prompt
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Describe the task both configurations should handle"
+              placeholder="Write the request both configurations will receive, as you would type it to Claude."
             />
           </label>
         </div>
-        {selectedCase && selectedCase.prompt !== prompt && (
-          <p className="panel-copy">
-            The prompt no longer matches “{selectedCase.name}”, so its assertions will not run.
-          </p>
-        )}
       </section>
       <div className="experiment-grid">
         {(['left', 'right'] as const).map((lane) => (
@@ -431,17 +315,6 @@ export function TestLabView({
           </div>
         ))}
       </section>
-      {saveCaseOpen && (
-        <SaveTestCaseModal
-          prompt={prompt}
-          onClose={() => setSaveCaseOpen(false)}
-          onSave={async (input) => {
-            const testCase = await onSaveTestCase(input);
-            setTestCaseId(testCase.id);
-            setSaveCaseOpen(false);
-          }}
-        />
-      )}
     </>
   );
 }

@@ -41,10 +41,17 @@ export type SkillPackage = SkillSummary & {
   findings: ValidationFinding[];
 };
 
-export type TrustedProject = {
+/** A project the user explicitly trusted, as stored. */
+export type StoredProject = {
   id: string;
   label: string;
   path: string;
-  skillCount: number;
   trustedAt: string;
+};
+
+/** A trusted project as the UI sees it, checked against the filesystem on every read. */
+export type TrustedProject = StoredProject & {
+  /** False when the folder has been moved or deleted since it was trusted. */
+  available: boolean;
+  skillCount: number;
 };

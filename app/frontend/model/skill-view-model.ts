@@ -1,5 +1,4 @@
 import {
-  isTerminalStatus,
   parseFrontmatter,
   type SkillFile,
   type SkillSummary,
@@ -99,20 +98,4 @@ export function formatTokens(run?: SkillTestRun): string {
 
 export function formatCost(run?: SkillTestRun): string {
   return run?.usage?.costUsd === undefined ? 'Unavailable' : `$${run.usage.costUsd.toFixed(4)}`;
-}
-
-export function formatAssertions(run?: SkillTestRun): string {
-  if (!run?.testCaseId) return 'No test case';
-  if (!isTerminalStatus(run.status)) return 'Pending';
-  if (run.assertions.length === 0) return 'None defined';
-  const passed = run.assertions.filter((assertion) => assertion.passed).length;
-  return `${passed}/${run.assertions.length} passed`;
-}
-
-/** Splits a comma- or newline-separated list typed by the user into trimmed, non-empty entries. */
-export function parseList(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 }

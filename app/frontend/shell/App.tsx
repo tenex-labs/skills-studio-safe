@@ -79,6 +79,7 @@ export default function App() {
             demoMode={studio.demoMode}
             onScopeChange={(scope, projectId) => void studio.loadCatalog(scope, projectId)}
             onRegisterProject={studio.registerProject}
+            onForgetProject={studio.forgetProject}
             onPickProject={studio.pickProject}
             onCreateSkill={(input) =>
               studio.createSkill(input).then(() => {
@@ -112,8 +113,6 @@ export default function App() {
             demoMode={studio.demoMode}
             onLaunch={studio.launchTest}
             onCancel={studio.cancelTest}
-            testCases={studio.testCases}
-            onSaveTestCase={studio.saveTestCase}
             onReauthenticate={studio.reauthenticateClaude}
             onSkillChange={studio.openSkill}
           />

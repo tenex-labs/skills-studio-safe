@@ -11,7 +11,7 @@ import type {
   SkillTestCase,
   SkillTestRun,
   SkillVersion,
-  TrustedProject,
+  StoredProject,
 } from '../../domain/index.ts';
 
 // Migrations are append-only. Never edit one that has shipped; add a new entry instead.
@@ -296,7 +296,7 @@ export class StudioDatabase {
     this.connection.close();
   }
 
-  saveTrustedProject(project: Omit<TrustedProject, 'skillCount'>): void {
+  saveTrustedProject(project: StoredProject): void {
     this.connection
       .prepare(
         `INSERT INTO trusted_projects(id, label, canonical_path, trusted_at)
@@ -306,25 +306,21 @@ export class StudioDatabase {
       .run(project);
   }
 
-  listTrustedProjects(): TrustedProject[] {
+  listTrustedProjects(): StoredProject[] {
     const rows = this.connection
       .prepare(
-        `SELECT p.id, p.label, p.canonical_path, p.trusted_at,
-          COUNT(s.id) AS skill_count
-         FROM trusted_projects p LEFT JOIN skills s ON s.project_id = p.id
-         GROUP BY p.id ORDER BY p.trusted_at, p.id`,
+        'SELECT id, label, canonical_path, trusted_at FROM trusted_projects ORDER BY trusted_at, id',
       )
-      .all() as (TrustedProjectRow & { skill_count: number })[];
+      .all() as TrustedProjectRow[];
     return rows.map((row) => ({
       id: row.id,
       label: row.label,
       path: row.canonical_path,
-      skillCount: row.skill_count,
       trustedAt: row.trusted_at,
     }));
   }
 
-  getTrustedProject(id: string): TrustedProject | undefined {
+  getTrustedProject(id: string): StoredProject | undefined {
     return this.listTrustedProjects().find((project) => project.id === id);
   }
 

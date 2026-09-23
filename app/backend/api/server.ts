@@ -16,7 +16,7 @@ import { createStudioRoutes, type StudioApiRequest, type StudioPlatform } from '
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4319;
-const VITE_DEV_PORT = 5173;
+const VITE_DEV_PORT = 4320;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
 type StudioServerOptions = {

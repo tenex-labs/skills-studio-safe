@@ -10,7 +10,7 @@ Requires Node 20.19+ or 22.12+ and, for live test runs, an authenticated `claude
 
 ```bash
 npm install
-npm run dev        # API on 127.0.0.1:4319, UI on http://localhost:5173
+npm run dev        # API on 127.0.0.1:4319, UI on http://localhost:4320
 npm run preflight  # format, lint, typecheck, test, build
 ```
 
@@ -19,11 +19,11 @@ explore it.
 
 ## What it does
 
-| Area         | What you can do                                                                                                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Library**  | Browse personal and trusted-project skills with their validation state and precedence conflicts. Trust a project through the native folder picker. Create a new skill.            |
-| **Editor**   | Edit a skill's files with a Markdown preview. Saving creates an immutable version in Studio's database. It never changes the installed files.                                     |
-| **Test Lab** | Run two configurations (version, model, effort, tool access, limits) against one prompt with `claude -p`. Save a prompt as a test case with expected phrases and compare results. |
+| Area         | What you can do                                                                                                                                                        |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Library**  | Browse personal and trusted-project skills with their validation state and precedence conflicts. Trust a project through the native folder picker. Create a new skill. |
+| **Editor**   | Edit a skill's files with a Markdown preview. Saving creates an immutable version in Studio's database. It never changes the installed files.                          |
+| **Test Lab** | Run two configurations (version, model, effort, tool access, limits) against one prompt with `claude -p` and compare output, time, tokens, and cost side by side.      |
 
 ## Rules the app keeps
 

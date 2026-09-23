@@ -2,12 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   isTerminalStatus,
   type LaunchTestInput,
-  type NewSkillTestCase,
   type SkillFile,
   type SkillPackage,
   type SkillScope,
   type SkillSummary,
-  type SkillTestCase,
   type SkillTestRun,
   type SkillTestTrace,
   type SkillVersion,
@@ -42,7 +40,6 @@ export function useStudio() {
   const [catalogError, setCatalogError] = useState('');
   const [selectedSkill, setSelectedSkill] = useState<SkillPackage>();
   const [versions, setVersions] = useState<SkillVersion[]>([]);
-  const [testCases, setTestCases] = useState<SkillTestCase[]>([]);
   const [runs, setRuns] = useState<SkillTestRun[]>([]);
   const [tracesByRun, setTracesByRun] = useState<Record<string, SkillTestTrace[]>>({});
   const closeStreams = useRef(new Map<string, () => void>());
@@ -103,15 +100,13 @@ export function useStudio() {
 
   const openSkill = useCallback(
     async (id: string) => {
-      const [skill, nextVersions, nextCases, nextRuns] = await Promise.all([
+      const [skill, nextVersions, nextRuns] = await Promise.all([
         api.skill(id),
         api.versions(id),
-        api.testCases(id),
         api.testRuns(id),
       ]);
       setSelectedSkill(skill);
       setVersions(nextVersions);
-      setTestCases(nextCases);
       setRuns(nextRuns);
       return skill;
     },
@@ -127,6 +122,16 @@ export function useStudio() {
     [api],
   );
 
+  const forgetProject = useCallback(
+    async (id: string) => {
+      await api.forgetProject(id);
+      setProjects((current) => current.filter((project) => project.id !== id));
+      setAllSkills((current) => current.filter((skill) => skill.projectId !== id));
+      setSkills((current) => current.filter((skill) => skill.projectId !== id));
+    },
+    [api],
+  );
+
   const pickProject = useCallback(() => api.pickProject(), [api]);
 
   const createSkill = useCallback(
@@ -137,7 +142,6 @@ export function useStudio() {
       setAllSkills((current) => [skill, ...current]);
       setSelectedSkill(skill);
       setVersions(nextVersions);
-      setTestCases([]);
       setRuns([]);
       return skill;
     },
@@ -166,16 +170,6 @@ export function useStudio() {
       setSelectedSkill(refreshed);
       setVersions((current) => [draft, ...current]);
       return { skill: refreshed };
-    },
-    [api, selectedSkill],
-  );
-
-  const saveTestCase = useCallback(
-    async (input: NewSkillTestCase) => {
-      if (!selectedSkill) throw new Error('Select a skill before saving a test case.');
-      const testCase = await api.createTestCase(selectedSkill.id, input);
-      setTestCases((current) => [...current, testCase]);
-      return testCase;
     },
     [api, selectedSkill],
   );
@@ -244,17 +238,16 @@ export function useStudio() {
     demoMode,
     selectedSkill,
     versions,
-    testCases,
     runs,
     tracesByRun,
     loadCatalog,
     openSkill,
     createSkill,
     registerProject,
+    forgetProject,
     pickProject,
     reauthenticateClaude,
     saveSkill,
-    saveTestCase,
     launchTest,
     cancelTest,
   };

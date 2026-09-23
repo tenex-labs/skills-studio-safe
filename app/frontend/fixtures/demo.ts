@@ -1,10 +1,4 @@
-import type {
-  SkillPackage,
-  SkillTestCase,
-  SkillTestRun,
-  SkillVersion,
-  TrustedProject,
-} from '../../domain/index';
+import type { SkillPackage, SkillTestRun, SkillVersion, TrustedProject } from '../../domain/index';
 
 const skillMarkdown = `---
 name: code-review
@@ -27,6 +21,7 @@ export const demoProjects: TrustedProject[] = [
     id: 'demo-project',
     label: 'Workshop project',
     path: '/trusted/workshop-project',
+    available: true,
     skillCount: 1,
     trustedAt: '2026-09-22T12:00:00Z',
   },
@@ -112,25 +107,12 @@ export const demoVersions: SkillVersion[] = [
   },
 ];
 
-export const demoTestCases: SkillTestCase[] = [
-  {
-    id: 'demo-case',
-    skillId: 'demo-personal-review',
-    name: 'Find a null handling bug',
-    prompt: 'Review a change that dereferences an optional user profile.',
-    expectedContains: ['profile'],
-    expectedExcludes: ['Looks good'],
-    createdAt: '2026-09-22T13:30:00Z',
-  },
-];
-
 export const demoRuns: SkillTestRun[] = [
   {
     id: 'demo-run',
     skillId: 'demo-personal-review',
     versionId: 'demo-version-current',
-    testCaseId: 'demo-case',
-    prompt: demoTestCases[0].prompt,
+    prompt: 'Review a change that dereferences an optional user profile.',
     model: 'sonnet',
     effort: 'high',
     toolPreset: 'none',
@@ -140,9 +122,6 @@ export const demoRuns: SkillTestRun[] = [
     durationMs: 3100,
     output: 'The optional profile is dereferenced before its presence is checked.',
     usage: { inputTokens: 410, outputTokens: 82, costUsd: 0.0031 },
-    assertions: [
-      { label: 'Output contains "profile"', passed: true },
-      { label: 'Output excludes "Looks good"', passed: true },
-    ],
+    assertions: [],
   },
 ];

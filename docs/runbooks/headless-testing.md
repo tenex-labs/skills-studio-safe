@@ -24,7 +24,6 @@ the prompt on stdin.
 | `timed-out`                           | The task needs more time or turns. Raise the limits under **Advanced settings**, or narrow the prompt.      |
 | `failed` after the turn limit warning | The model kept going past the turn limit. Raise **Turns** or tighten the skill.                             |
 | Status stuck on `running`             | The API server stopped mid-run. Restart it; the run becomes `interrupted`.                                  |
-| Assertions fail on a `passed` run     | Expected. Status is about the process; assertions are about the output. Check the expected phrases.         |
 | Project skill missing from Skill list | The project is not trusted, or the skill is invalid. Trust the project in Library and check its findings.   |
 
 Automated tests use a fake Claude process. Real `claude -p` runs are manual because they depend on

@@ -164,7 +164,11 @@ export function createStudioRoutes(options: StudioRoutesOptions) {
     },
 
     // Trusted projects
-    { method: 'GET', pattern: 'projects', handle: () => ok({ projects: catalog.listProjects() }) },
+    {
+      method: 'GET',
+      pattern: 'projects',
+      handle: async () => ok({ projects: await catalog.listProjects() }),
+    },
     {
       method: 'POST',
       pattern: 'projects',

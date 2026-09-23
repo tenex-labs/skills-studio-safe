@@ -19,5 +19,5 @@
 ## Challenges
 
 Each file in [`../challenges/`](../challenges/) is a self-contained, roughly 20-minute exercise:
-add a validator rule, add an assertion type, clarify precedence conflicts, improve accessibility,
+add a validator rule, add output checks to Test Lab, clarify precedence conflicts, improve accessibility,
 or design your own slice.

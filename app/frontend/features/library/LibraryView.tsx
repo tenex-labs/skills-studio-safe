@@ -1,4 +1,4 @@
-import { AlertTriangle, FolderOpen, Plus, Search } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Plus, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { SkillScope, SkillSummary, TrustedProject } from '../../../domain/index';
 import {
@@ -19,6 +19,7 @@ export function LibraryView({
   onScopeChange,
   onOpen,
   onRegisterProject,
+  onForgetProject,
   onPickProject,
   onCreateSkill,
 }: {
@@ -30,6 +31,7 @@ export function LibraryView({
   onScopeChange: (scope: SkillScope, projectId?: string) => void;
   onOpen: (skill: SkillSummary) => void;
   onRegisterProject: (input: { label: string; path: string }) => Promise<TrustedProject>;
+  onForgetProject: (id: string) => Promise<void>;
   onPickProject: () => Promise<{ label: string; path: string }>;
   onCreateSkill: (input: {
     scope: SkillScope;
@@ -43,9 +45,11 @@ export function LibraryView({
   const [query, setQuery] = useState('');
   const [registerError, setRegisterError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [forgetOpen, setForgetOpen] = useState(false);
   const [skillName, setSkillName] = useState('');
   const [skillDescription, setSkillDescription] = useState('');
   const filtered = useMemo(() => filterCatalog(skills, query), [query, skills]);
+  const selectedProject = projects.find((project) => project.id === projectId);
 
   const chooseScope = (next: SkillScope) => {
     setScope(next);
@@ -104,7 +108,9 @@ export function LibraryView({
               options={projects.map((project) => ({
                 value: project.id,
                 label: project.label,
-                description: `${project.skillCount} skill${project.skillCount === 1 ? '' : 's'}`,
+                description: project.available
+                  ? `${project.skillCount} skill${project.skillCount === 1 ? '' : 's'}`
+                  : 'Folder not found',
               }))}
               onChange={chooseProject}
               hideLabel
@@ -129,6 +135,16 @@ export function LibraryView({
               <FolderOpen size={17} aria-hidden="true" />
               Choose project folder
             </button>
+            {selectedProject && (
+              <button
+                className="button secondary"
+                disabled={demoMode}
+                onClick={() => setForgetOpen(true)}
+              >
+                <Trash2 size={17} aria-hidden="true" />
+                Forget project
+              </button>
+            )}
           </>
         )}
         <label className="search-field">
@@ -142,6 +158,13 @@ export function LibraryView({
           />
         </label>
       </section>
+      {scope === 'project' && selectedProject && !selectedProject.available && (
+        <div className="notice warning" role="status">
+          <AlertTriangle size={17} aria-hidden="true" />
+          This project's folder no longer exists at {selectedProject.path}. If it moved, forget it
+          and choose the folder again.
+        </div>
+      )}
       {registerError && (
         <p className="notice warning" role="status">
           {registerError}
@@ -197,6 +220,24 @@ export function LibraryView({
           </button>
         ))}
       </section>
+      {forgetOpen && selectedProject && (
+        <Modal
+          title="Forget this project?"
+          confirmLabel="Forget project"
+          onClose={() => setForgetOpen(false)}
+          onConfirm={() => {
+            void onForgetProject(selectedProject.id).then(() => {
+              setForgetOpen(false);
+              setProjectId('');
+            });
+          }}
+        >
+          <p>
+            Studio stops scanning {selectedProject.label} and deletes the versions and test runs it
+            saved for that project's skills. Files in the folder are not touched.
+          </p>
+        </Modal>
+      )}
       {createOpen && (
         <Modal
           title="Create a skill"

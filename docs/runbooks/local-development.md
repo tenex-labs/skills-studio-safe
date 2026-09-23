@@ -7,9 +7,9 @@ npm install
 npm run dev
 ```
 
-This starts the API on `127.0.0.1:4319` and the UI on `http://localhost:5173`. Vite proxies
-`/api` to the API. If port 4319 is taken, another Studio server is probably still running; stop it
-first.
+This starts the API on `127.0.0.1:4319` and the UI on `http://localhost:4320`. Vite proxies
+`/api` to the API. Both ports are fixed: if either is taken, another Studio instance is probably
+still running, so stop it first.
 
 Before handing off a change, run `npm run preflight`. It checks formatting, lint, and types, then
 runs every test and a production build.

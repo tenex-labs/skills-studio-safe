@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { SkillSummary } from '../../../app/domain/index';
-import { demoRuns, demoSkills } from '../../../app/frontend/fixtures/demo';
+import { demoSkills } from '../../../app/frontend/fixtures/demo';
 import {
   conflictLabel,
   filesAreDirty,
   filterCatalog,
-  formatAssertions,
   packageDiffSummary,
-  parseList,
   parseSkillMetadata,
   updateFile,
   validationLabel,
@@ -50,27 +48,5 @@ describe('editor working copies', () => {
       description: 'Use when: reviewing',
     });
     expect(parseSkillMetadata('No frontmatter')).toEqual({});
-  });
-});
-
-describe('test run projections', () => {
-  const run = demoRuns[0];
-
-  it('summarizes assertions without confusing pending, empty, and missing test cases', () => {
-    expect(formatAssertions(undefined)).toBe('No test case');
-    expect(formatAssertions({ ...run, testCaseId: undefined })).toBe('No test case');
-    expect(formatAssertions({ ...run, status: 'running', assertions: [] })).toBe('Pending');
-    expect(formatAssertions({ ...run, assertions: [] })).toBe('None defined');
-    expect(
-      formatAssertions({ ...run, assertions: [...run.assertions, { label: 'x', passed: false }] }),
-    ).toBe('2/3 passed');
-  });
-
-  it('parses comma- and newline-separated expectations', () => {
-    expect(parseList(' profile, null \n\n  dereference ')).toEqual([
-      'profile',
-      'null',
-      'dereference',
-    ]);
   });
 });
