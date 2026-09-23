@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SkillSummary } from '../../app/domain/index';
-import { demoRuns, demoSkills, demoVersions } from '../../app/frontend/fixtures/demo';
+import { demoSkills } from '../../app/frontend/fixtures/demo';
 import {
-  comparisonRows,
   conflictLabel,
   filesAreDirty,
   filterCatalog,
@@ -43,33 +42,6 @@ describe('editor working copies', () => {
     expect(parseSkillMetadata(demoSkills[0].files[0].content)).toMatchObject({
       name: 'code-review',
       description: 'Review a change for consequential correctness problems.',
-    });
-  });
-});
-
-describe('comparison evidence', () => {
-  it('marks unavailable version evidence and reports test metrics', () => {
-    const version = comparisonRows({
-      kind: 'version',
-      id: demoVersions[0].id,
-      label: demoVersions[0].label,
-      version: demoVersions[0],
-      skill: demoSkills[0],
-    });
-    const run = comparisonRows({
-      kind: 'run',
-      id: demoRuns[0].id,
-      label: demoRuns[0].model,
-      run: demoRuns[0],
-      findings: demoSkills[0].findings,
-    });
-
-    expect(version).toMatchObject({ output: 'Not applicable to a version', model: 'Unavailable' });
-    expect(run).toMatchObject({
-      model: 'sonnet',
-      duration: '3.1s',
-      tokens: '410 in / 82 out',
-      cost: '$0.0031',
     });
   });
 });

@@ -20,6 +20,7 @@ export function useStudio() {
   const [readinessState, setReadinessState] = useState<LoadState>('loading');
   const [projects, setProjects] = useState<TrustedProject[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [allSkills, setAllSkills] = useState<SkillSummary[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('loading');
   const [catalogError, setCatalogError] = useState('');
   const [demoMode, setDemoMode] = useState(false);
@@ -27,16 +28,20 @@ export function useStudio() {
   const [versions, setVersions] = useState<SkillVersion[]>([]);
   const [testCases, setTestCases] = useState<SkillTestCase[]>([]);
   const [runs, setRuns] = useState<SkillTestRun[]>([]);
-  const [traces, setTraces] = useState<SkillTestTrace[]>([]);
-  const closeStream = useRef<() => void>(() => undefined);
+  const [tracesByRun, setTracesByRun] = useState<Record<string, SkillTestTrace[]>>({});
+  const closeStreams = useRef(new Map<string, () => void>());
+  const demoRunCounter = useRef(0);
 
   const loadReadiness = useCallback(async () => {
     try {
-      setReadiness(await studioApi.readiness());
+      const next = await studioApi.readiness();
+      setReadiness(next);
       setReadinessState('ready');
+      return next;
     } catch {
       setReadiness(unavailableReadiness);
       setReadinessState('error');
+      return unavailableReadiness;
     }
   }, []);
 
@@ -44,16 +49,21 @@ export function useStudio() {
     setCatalogState('loading');
     setCatalogError('');
     try {
-      const [nextProjects, nextSkills] = await Promise.all([
+      const [nextProjects, catalog] = await Promise.all([
         studioApi.projects(),
-        studioApi.skills(scope, projectId),
+        studioApi.catalog(),
       ]);
+      const nextSkills = catalog.filter(
+        (skill) => skill.scope === scope && (scope !== 'project' || skill.projectId === projectId),
+      );
       setProjects(nextProjects);
+      setAllSkills(catalog);
       setSkills(nextSkills);
       setDemoMode(false);
       setCatalogState('ready');
     } catch {
       setProjects(demoProjects);
+      setAllSkills(demoSkills);
       setSkills(
         demoSkills.filter(
           (skill) =>
@@ -67,13 +77,15 @@ export function useStudio() {
   }, []);
 
   useEffect(() => {
+    const streams = closeStreams.current;
     const start = window.setTimeout(() => {
       void loadReadiness();
       void loadCatalog('personal');
     }, 0);
     return () => {
       window.clearTimeout(start);
-      closeStream.current();
+      for (const close of streams.values()) close();
+      streams.clear();
     };
   }, [loadCatalog, loadReadiness]);
 
@@ -108,45 +120,67 @@ export function useStudio() {
     return project;
   }, []);
 
-  const createVersion = useCallback(
-    async (input: { label: string; note?: string; files: SkillFile[] }) => {
-      if (!selectedSkill) throw new Error('Select a skill before creating a draft.');
-      const version = demoMode
-        ? {
-            id: `demo-draft-${versions.length + 1}`,
-            skillId: selectedSkill.id,
-            revision: `draft:${versions.length + 1}`,
-            label: input.label,
-            note: input.note,
-            createdAt: new Date().toISOString(),
-            source: 'draft' as const,
-            files: input.files,
-          }
-        : await studioApi.createVersion(selectedSkill.id, {
-            ...input,
-            baseRevision: selectedSkill.revision,
-          });
-      setVersions((current) => [version, ...current]);
-      return version;
+  const pickProject = useCallback(() => studioApi.pickProject(), []);
+
+  const createSkill = useCallback(
+    async (input: { scope: SkillScope; projectId?: string; name: string; description: string }) => {
+      const skill = await studioApi.createSkill(input);
+      const nextVersions = await studioApi.versions(skill.id);
+      setSkills((current) => [skill, ...current]);
+      setAllSkills((current) => [skill, ...current]);
+      setSelectedSkill(skill);
+      setVersions(nextVersions);
+      setTestCases([]);
+      setRuns([]);
+      return skill;
     },
-    [demoMode, selectedSkill, versions.length],
+    [],
   );
 
-  const promoteVersion = useCallback(
-    async (versionId: string) => {
-      if (!selectedSkill) throw new Error('Select a skill before promoting a version.');
-      if (!demoMode) {
-        await studioApi.promoteVersion(selectedSkill.id, versionId, selectedSkill.revision);
-        const refreshedSkill = await studioApi.skill(selectedSkill.id);
-        setSelectedSkill(refreshedSkill);
+  const reauthenticateClaude = useCallback(async () => {
+    await studioApi.startClaudeLogin();
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+      const next = await loadReadiness();
+      if (next.authLogin?.state === 'completed' || next.authLogin?.state === 'failed') break;
+    }
+  }, [loadReadiness]);
+
+  const saveSkill = useCallback(
+    async (input: { files: SkillFile[] }) => {
+      if (!selectedSkill) throw new Error('Select a skill before saving.');
+      if (demoMode) {
+        const refreshed = {
+          ...selectedSkill,
+          revision: `demo-saved:${Date.now()}`,
+          files: input.files,
+        };
+        const version = {
+          id: `demo-saved-${versions.length + 1}`,
+          skillId: refreshed.id,
+          revision: refreshed.revision,
+          label: 'Saved Studio version',
+          note: 'Saved from Editor',
+          createdAt: new Date().toISOString(),
+          source: 'draft' as const,
+          files: input.files,
+        };
+        setSelectedSkill(refreshed);
+        setVersions((current) => [version, ...current]);
+        return { skill: refreshed };
       }
-      setVersions((current) =>
-        current.map((version) =>
-          version.id === versionId ? { ...version, source: 'promoted' as const } : version,
-        ),
-      );
+      const draft = await studioApi.createVersion(selectedSkill.id, {
+        label: `Saved ${new Date().toLocaleString()}`,
+        note: 'Saved from Editor',
+        files: input.files,
+        baseRevision: selectedSkill.revision,
+      });
+      const refreshed = { ...selectedSkill, files: input.files, revision: draft.revision };
+      setSelectedSkill(refreshed);
+      setVersions((current) => [draft, ...current]);
+      return { skill: refreshed };
     },
-    [demoMode, selectedSkill],
+    [demoMode, selectedSkill, versions.length],
   );
 
   const launchTest = useCallback(
@@ -155,15 +189,19 @@ export function useStudio() {
       testCaseId?: string;
       prompt: string;
       model: string;
-      settings: { maxTurns: number; timeoutSeconds: number };
+      projectId?: string;
+      settings: {
+        maxTurns: number;
+        timeoutSeconds: number;
+        effort: string;
+        toolPreset: 'none' | 'read-only';
+      };
     }) => {
       if (!selectedSkill) throw new Error('Select a skill before launching a test.');
-      closeStream.current();
-      setTraces([]);
       const run = demoMode
         ? {
             ...demoRuns[0],
-            id: `demo-run-${runs.length + 1}`,
+            id: `demo-run-${++demoRunCounter.current}`,
             versionId: input.versionId,
             testCaseId: input.testCaseId,
             prompt: input.prompt,
@@ -174,30 +212,73 @@ export function useStudio() {
           }
         : await studioApi.launchTest({ skillId: selectedSkill.id, ...input });
       setRuns((current) => [run, ...current.filter(({ id }) => id !== run.id)]);
+      setTracesByRun((current) => ({ ...current, [run.id]: [] }));
+      if (demoMode) {
+        window.setTimeout(() => {
+          const output = `Demo response from ${input.model} using the selected skill version.`;
+          setTracesByRun((current) => ({
+            ...current,
+            [run.id]: [
+              {
+                id: `${run.id}-assistant`,
+                timestamp: new Date().toISOString(),
+                kind: 'assistant',
+                text: output,
+              },
+              {
+                id: `${run.id}-result`,
+                timestamp: new Date().toISOString(),
+                kind: 'result',
+                status: 'passed',
+              },
+            ],
+          }));
+          setRuns((current) =>
+            current.map((item) =>
+              item.id === run.id
+                ? {
+                    ...item,
+                    status: 'passed',
+                    output,
+                    durationMs: 800,
+                    assertions: [],
+                  }
+                : item,
+            ),
+          );
+        }, 250);
+      }
       if (!demoMode && typeof EventSource !== 'undefined') {
-        closeStream.current = studioApi.testEvents(
+        const close = studioApi.testEvents(
           run.id,
           (trace) => {
-            setTraces((current) => [...current, trace]);
+            setTracesByRun((current) => ({
+              ...current,
+              [run.id]: [...(current[run.id] ?? []), trace],
+            }));
             if (trace.kind === 'result') {
               void studioApi.test(run.id).then((finalRun) => {
                 setRuns((current) =>
                   current.map((item) => (item.id === finalRun.id ? finalRun : item)),
                 );
+                closeStreams.current.get(run.id)?.();
+                closeStreams.current.delete(run.id);
               });
             }
           },
           () => undefined,
         );
+        closeStreams.current.set(run.id, close);
       }
       return run;
     },
-    [demoMode, runs.length, selectedSkill],
+    [demoMode, selectedSkill],
   );
 
   const cancelTest = useCallback(
     async (id: string) => {
-      closeStream.current();
+      closeStreams.current.get(id)?.();
+      closeStreams.current.delete(id);
       const run = demoMode ? runs.find((item) => item.id === id) : await studioApi.cancelTest(id);
       if (!run) return;
       const cancelled = { ...run, status: 'cancelled' as const };
@@ -211,6 +292,7 @@ export function useStudio() {
     readinessState,
     projects,
     skills,
+    allSkills,
     catalogState,
     catalogError,
     demoMode,
@@ -218,12 +300,14 @@ export function useStudio() {
     versions,
     testCases,
     runs,
-    traces,
+    tracesByRun,
     loadCatalog,
     openSkill,
+    createSkill,
     registerProject,
-    createVersion,
-    promoteVersion,
+    pickProject,
+    reauthenticateClaude,
+    saveSkill,
     launchTest,
     cancelTest,
   };

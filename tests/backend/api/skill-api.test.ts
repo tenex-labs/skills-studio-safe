@@ -24,11 +24,12 @@ async function setup() {
   );
   const database = new StudioDatabase(':memory:');
   databases.push(database);
+  let generatedId = 0;
   const catalog = new SkillCatalog({
     database,
     personalRoot,
     now: () => '2026-09-22T12:00:00.000Z',
-    id: () => 'generated-id',
+    id: () => `generated-id-${generatedId++}`,
   });
   const api = createStudioApi({
     catalog,
@@ -52,6 +53,22 @@ describe('createStudioApi', () => {
     );
     expect(await api({ method: 'GET', path: `/api/studio/skills/${skillId}/versions` })).toEqual(
       expect.objectContaining({ status: 200 }),
+    );
+    const created = await api({
+      method: 'POST',
+      path: '/api/studio/skills',
+      capability: 'test-capability',
+      body: {
+        scope: 'personal',
+        name: 'new-skill',
+        description: 'New skill for API testing',
+      },
+    });
+    expect(created).toEqual(
+      expect.objectContaining({
+        status: 201,
+        body: { skill: expect.objectContaining({ name: 'new-skill', readOnly: false }) },
+      }),
     );
     const testCase = await api({
       method: 'POST',

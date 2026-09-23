@@ -59,12 +59,36 @@ export const studioApi = {
     );
     return 'project' in value ? value.project : value;
   },
-  skills: async (scope: SkillScope, projectId?: string) => {
+  pickProject: () =>
+    request<{ project: { label: string; path: string } }>(`${apiRoot}/projects/pick`, {
+      method: 'POST',
+      body: '{}',
+    }).then(({ project }) => project),
+  startClaudeLogin: () =>
+    request<{ started: boolean }>(`${apiRoot}/auth/login`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  catalog: async () => {
     const value = await request<SkillSummary[] | { skills: SkillSummary[] }>(`${apiRoot}/catalog`);
-    return listFrom(value, 'skills').filter(
+    return listFrom(value, 'skills');
+  },
+  skills: async (scope: SkillScope, projectId?: string) => {
+    const skills = await studioApi.catalog();
+    return skills.filter(
       (skill) => skill.scope === scope && (scope !== 'project' || skill.projectId === projectId),
     );
   },
+  createSkill: (input: {
+    scope: SkillScope;
+    projectId?: string;
+    name: string;
+    description: string;
+  }) =>
+    request<{ skill: SkillPackage }>(`${apiRoot}/skills`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }).then(({ skill }) => skill),
   skill: async (id: string) => {
     const value = await request<SkillPackage | { skill: SkillPackage }>(
       `${apiRoot}/skills/${encodeURIComponent(id)}`,
@@ -90,15 +114,6 @@ export const studioApi = {
     );
     return 'version' in value ? value.version : value;
   },
-  promoteVersion: async (id: string, versionId: string, baseRevision: string) => {
-    const value = await request<
-      SkillVersion | SkillPackage | { version: SkillVersion; skill: SkillPackage }
-    >(`${apiRoot}/skills/${encodeURIComponent(id)}/promote`, {
-      method: 'POST',
-      body: JSON.stringify({ versionId, baseRevision }),
-    });
-    return 'version' in value && 'skill' in value ? value.version : value;
-  },
   testCases: async (id: string) => {
     const value = await request<SkillTestCase[] | { testCases: SkillTestCase[] }>(
       `${apiRoot}/skills/${encodeURIComponent(id)}/test-cases`,
@@ -123,7 +138,13 @@ export const studioApi = {
     testCaseId?: string;
     prompt: string;
     model: string;
-    settings: { maxTurns: number; timeoutSeconds: number };
+    projectId?: string;
+    settings: {
+      maxTurns: number;
+      timeoutSeconds: number;
+      effort: string;
+      toolPreset: 'none' | 'read-only';
+    };
   }) =>
     request<{ testRun: SkillTestRun }>(`${apiRoot}/test-runs`, {
       method: 'POST',

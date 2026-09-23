@@ -21,7 +21,7 @@ These rules keep Claude Skill Studio direct and recoverable.
 - Canonicalize paths and keep reads/writes inside personal or explicitly trusted project roots.
 - Model personal and project sources separately. Compute precedence; never merge same-name content.
 - Rescan safely after external changes and represent malformed, missing, or conflicting skills.
-- Promote with explicit scope, an immutable pre-write version, and an atomic replacement.
+- Save editor changes as immutable Studio versions without replacing installed skill files.
 
 ## SQLite
 
@@ -47,7 +47,7 @@ These rules keep Claude Skill Studio direct and recoverable.
   status announcements.
 - Label source scope, effective precedence, draft/installed state, active/saved state, and runner
   terminal status in user-facing text.
-- Preserve semantic navigation and keyboard-complete Library, Editor, Test Lab, and Compare flows.
+- Preserve semantic navigation and keyboard-complete Library, Editor, and two-lane Test Lab flows.
 
 ## Tests
 

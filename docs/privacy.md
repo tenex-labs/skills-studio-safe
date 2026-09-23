@@ -42,7 +42,7 @@ telemetry. “Local application” does not mean model inference is offline.
 1. Bind the application server to loopback and restrict browser origins.
 2. Treat paths and API payloads as untrusted; canonicalize roots and reject traversal or symlink
    escape.
-3. Require explicit project trust before scan, read, write, test, or promotion.
+3. Require explicit project trust before scan, read, or test.
 4. Spawn `claude -p` without a shell, disable tools, enforce time/output limits, and support cancel.
 5. Never log skill bodies, prompts, final output, trace chunks, credentials, environment values, or
    full home-directory paths.

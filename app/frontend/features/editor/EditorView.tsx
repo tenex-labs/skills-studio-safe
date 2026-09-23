@@ -1,7 +1,7 @@
-import { AlertTriangle, CheckCircle2, File, GitCommit, RotateCcw, Save } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Code2, Eye, File, GitCommit, Save } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { SkillFile, SkillPackage, SkillVersion } from '../../../domain/index';
-import { EmptyState, Modal, PageHeading, StatusPill } from '../../ui/components';
+import { EmptyState, Modal, PageHeading, StateText } from '../../ui/components';
 import {
   filesAreDirty,
   packageDiffSummary,
@@ -29,25 +29,17 @@ function MarkdownPreview({ content }: { content: string }) {
 export function EditorView({
   skill,
   versions,
-  onCreateVersion,
-  onPromote,
+  onSave,
 }: {
   skill?: SkillPackage;
   versions: SkillVersion[];
-  onCreateVersion: (input: {
-    label: string;
-    note?: string;
-    files: SkillFile[];
-  }) => Promise<SkillVersion>;
-  onPromote: (versionId: string) => Promise<void>;
+  onSave: (input: { files: SkillFile[] }) => Promise<{ skill: SkillPackage }>;
 }) {
   const [baseline, setBaseline] = useState<SkillFile[]>(skill?.files ?? []);
   const [files, setFiles] = useState<SkillFile[]>(skill?.files ?? []);
   const [selectedPath, setSelectedPath] = useState(skill?.files[0]?.path ?? '');
-  const [draftOpen, setDraftOpen] = useState(false);
-  const [draftLabel, setDraftLabel] = useState('');
-  const [draftNote, setDraftNote] = useState('');
-  const [promoteTarget, setPromoteTarget] = useState<SkillVersion>();
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [contentMode, setContentMode] = useState<'markdown' | 'preview'>('markdown');
   const [message, setMessage] = useState('');
 
   const selected = files.find((file) => file.path === selectedPath);
@@ -72,36 +64,29 @@ export function EditorView({
     );
   }
 
-  const saveDraft = async () => {
-    const version = await onCreateVersion({
-      label: draftLabel,
-      note: draftNote || undefined,
+  const saveChanges = async () => {
+    const result = await onSave({
       files,
     });
-    setBaseline(version.files);
-    setDraftOpen(false);
-    setDraftLabel('');
-    setDraftNote('');
-    setMessage(`Draft “${version.label}” created. Installed files were not changed.`);
+    setBaseline(result.skill.files);
+    setFiles(result.skill.files);
+    setSaveOpen(false);
+    setMessage('Version saved in Skill Studio. The installed source was not changed.');
   };
 
   return (
     <>
       <PageHeading
         title={skill.name}
-        description="Edit a working copy, validate its package, and save an immutable draft."
+        description="Edit the skill, preview the result, and save with automatic version history."
         action={
           <div className="button-row">
-            <StatusPill tone={dirty ? 'warning' : 'success'}>
+            <StateText tone={dirty ? 'warning' : 'success'}>
               {dirty ? 'Unsaved draft changes' : 'Working copy clean'}
-            </StatusPill>
-            <button
-              className="button primary"
-              disabled={!dirty || skill.readOnly}
-              onClick={() => setDraftOpen(true)}
-            >
+            </StateText>
+            <button className="button primary" disabled={!dirty} onClick={() => setSaveOpen(true)}>
               <Save size={17} aria-hidden="true" />
-              Create draft
+              Save changes
             </button>
           </div>
         }
@@ -109,8 +94,8 @@ export function EditorView({
       {skill.readOnly && (
         <div className="notice warning">
           <AlertTriangle size={17} aria-hidden="true" />
-          This installed source is read-only. Inspect it here or create a draft from a writable
-          skill.
+          This source is managed elsewhere. Studio saves remain local versions and never overwrite
+          the installed skill.
         </div>
       )}
       {message && (
@@ -124,9 +109,21 @@ export function EditorView({
           <span>Name</span>
           <strong>{metadata.name ?? 'Missing'}</strong>
         </div>
-        <div>
+        <div className="metadata-description">
           <span>Description</span>
           <strong>{metadata.description ?? 'Missing'}</strong>
+        </div>
+        <div className="metadata-source">
+          <span>Source</span>
+          <strong title={skill.sourcePath}>{skill.sourcePath ?? skill.relativePath}</strong>
+        </div>
+        <div>
+          <span>Scope</span>
+          <strong>{skill.scope}</strong>
+        </div>
+        <div>
+          <span>Files</span>
+          <strong>{skill.fileCount}</strong>
         </div>
         <div>
           <span>Validation</span>
@@ -151,34 +148,48 @@ export function EditorView({
             </button>
           ))}
         </aside>
-        <section className="panel editor-panel" aria-label="Text editor">
+        <section className="panel editor-panel" aria-label="Skill content">
           <div className="panel-heading">
             <strong>{selected?.path ?? 'No file selected'}</strong>
-            <span>Working copy</span>
+            <div className="content-tabs" role="tablist" aria-label="Skill content view">
+              <button
+                role="tab"
+                aria-selected={contentMode === 'markdown'}
+                onClick={() => setContentMode('markdown')}
+              >
+                <Code2 size={15} aria-hidden="true" />
+                Markdown
+              </button>
+              <button
+                role="tab"
+                aria-selected={contentMode === 'preview'}
+                onClick={() => setContentMode('preview')}
+              >
+                <Eye size={15} aria-hidden="true" />
+                Preview
+              </button>
+            </div>
           </div>
-          <textarea
-            aria-label="File content"
-            value={selected?.content ?? ''}
-            readOnly={skill.readOnly || !selected}
-            onChange={(event) =>
-              setFiles((current) => updateFile(current, selectedPath, event.target.value))
-            }
-            spellCheck={false}
-          />
-        </section>
-        <section className="panel preview-panel">
-          <div className="panel-heading">
-            <strong>Preview</strong>
-            <span>Text only · HTML disabled</span>
-          </div>
-          <MarkdownPreview content={selected?.content ?? ''} />
+          {contentMode === 'markdown' ? (
+            <textarea
+              aria-label="File content"
+              value={selected?.content ?? ''}
+              readOnly={!selected}
+              onChange={(event) =>
+                setFiles((current) => updateFile(current, selectedPath, event.target.value))
+              }
+              spellCheck={false}
+            />
+          ) : (
+            <MarkdownPreview content={selected?.content ?? ''} />
+          )}
         </section>
       </div>
       <div className="editor-bottom">
         <section className="panel findings-panel" aria-labelledby="findings-title">
           <div className="panel-heading">
             <h2 id="findings-title">Validation findings</h2>
-            <StatusPill
+            <StateText
               tone={
                 skill.validation.errors
                   ? 'danger'
@@ -188,7 +199,7 @@ export function EditorView({
               }
             >
               {validationLabel(skill.validation)}
-            </StatusPill>
+            </StateText>
           </div>
           {skill.findings.length === 0 ? (
             <p className="panel-copy">No validation findings.</p>
@@ -210,73 +221,39 @@ export function EditorView({
         <section className="panel versions-panel" aria-labelledby="versions-title">
           <div className="panel-heading">
             <h2 id="versions-title">Version timeline</h2>
-            <StatusPill>{versions.length} versions</StatusPill>
+            <StateText>{versions.length} versions</StateText>
           </div>
           {versions.length === 0 ? (
             <p className="panel-copy">No immutable drafts yet.</p>
           ) : (
             <ol className="version-list">
-              {versions.map((version, index) => (
+              {versions.map((version) => (
                 <li key={version.id}>
                   <GitCommit size={17} aria-hidden="true" />
                   <div>
                     <strong>{version.label}</strong>
                     <small>
-                      {version.source} · {version.revision}
+                      {version.source} · {new Date(version.createdAt).toLocaleString()}
                     </small>
                     <p>{version.note || 'No note'}</p>
                     <span>{packageDiffSummary(skill.files, version.files)}</span>
                   </div>
-                  <button className="button secondary" onClick={() => setPromoteTarget(version)}>
-                    {index === 0 ? 'Promote' : 'Rollback to'}
-                  </button>
                 </li>
               ))}
             </ol>
           )}
         </section>
       </div>
-      {draftOpen && (
+      {saveOpen && (
         <Modal
-          title="Create immutable draft"
-          confirmLabel="Create draft"
-          onClose={() => setDraftOpen(false)}
-          onConfirm={() => void saveDraft()}
-        >
-          <p>The installed skill remains unchanged until a version is explicitly promoted.</p>
-          <label>
-            Version label
-            <input
-              autoFocus
-              value={draftLabel}
-              onChange={(event) => setDraftLabel(event.target.value)}
-            />
-          </label>
-          <label>
-            Note (optional)
-            <textarea value={draftNote} onChange={(event) => setDraftNote(event.target.value)} />
-          </label>
-        </Modal>
-      )}
-      {promoteTarget && (
-        <Modal
-          title={promoteTarget === versions[0] ? 'Promote version?' : 'Rollback installed version?'}
-          confirmLabel={promoteTarget === versions[0] ? 'Promote version' : 'Confirm rollback'}
-          onClose={() => setPromoteTarget(undefined)}
-          onConfirm={() => {
-            void onPromote(promoteTarget.id).then(() => {
-              setMessage(`“${promoteTarget.label}” promoted after confirmation.`);
-              setPromoteTarget(undefined);
-            });
-          }}
+          title="Save this version?"
+          confirmLabel="Save changes"
+          onClose={() => setSaveOpen(false)}
+          onConfirm={() => void saveChanges()}
         >
           <p>
-            This changes which immutable package is installed. The current version remains in the
-            timeline and can be restored later.
-          </p>
-          <p>
-            <RotateCcw size={15} aria-hidden="true" />{' '}
-            {packageDiffSummary(skill.files, promoteTarget.files)}
+            Skill Studio will save this working copy to local version history. The installed skill
+            on your computer will not be changed.
           </p>
         </Modal>
       )}

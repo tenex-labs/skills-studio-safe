@@ -1,4 +1,3 @@
-import { AlertCircle, CheckCircle2, Circle, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { StudioReadiness } from '../../domain/index';
 import type { LoadState } from '../model/skill-view-model';
@@ -23,7 +22,7 @@ export function PageHeading({
   );
 }
 
-export function StatusPill({
+export function StateText({
   tone = 'neutral',
   children,
 }: {
@@ -31,7 +30,7 @@ export function StatusPill({
   children: ReactNode;
 }) {
   return (
-    <span className="status-pill" data-tone={tone}>
+    <span className="quiet-state" data-tone={tone}>
       {children}
     </span>
   );
@@ -48,25 +47,24 @@ export function ReadinessBar({
   return (
     <section className="readiness-bar" aria-label="Studio readiness" aria-live="polite">
       <div className="readiness-title">
-        <ShieldCheck size={17} aria-hidden="true" />
         <strong>Local setup</strong>
       </div>
       <div className="readiness-items">
-        <span>
-          {claudeReady ? <CheckCircle2 aria-hidden="true" /> : <AlertCircle aria-hidden="true" />}
-          Claude {claudeReady ? 'account found' : 'sign-in required'}
+        <span data-state={claudeReady ? 'ready' : 'warning'}>
+          Claude:{' '}
+          {readiness.authLogin?.state === 'completed'
+            ? 'sign-in refreshed'
+            : readiness.authLogin?.state === 'running'
+              ? 'sign-in in progress'
+              : claudeReady
+                ? 'account found'
+                : 'sign-in required'}
         </span>
-        <span>
-          {readiness.database === 'ready' ? (
-            <CheckCircle2 aria-hidden="true" />
-          ) : (
-            <AlertCircle aria-hidden="true" />
-          )}
-          Draft store {readiness.database}
+        <span data-state={readiness.database === 'ready' ? 'ready' : 'warning'}>
+          Draft store: {readiness.database}
         </span>
-        <span>
-          <Circle aria-hidden="true" />
-          {readiness.activeTests} active test{readiness.activeTests === 1 ? '' : 's'}
+        <span data-state={readiness.activeTests ? 'active' : 'neutral'}>
+          Active tests: {readiness.activeTests}
         </span>
       </div>
       <p>
@@ -93,12 +91,14 @@ export function Modal({
   confirmLabel,
   onConfirm,
   onClose,
+  confirmDisabled = false,
 }: {
   title: string;
   children: ReactNode;
   confirmLabel: string;
   onConfirm: () => void;
   onClose: () => void;
+  confirmDisabled?: boolean;
 }) {
   return (
     <div className="modal-backdrop" role="presentation">
@@ -109,7 +109,7 @@ export function Modal({
           <button className="button secondary" onClick={onClose}>
             Cancel
           </button>
-          <button className="button primary" onClick={onConfirm}>
+          <button className="button primary" disabled={confirmDisabled} onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>

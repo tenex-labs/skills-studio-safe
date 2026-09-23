@@ -37,9 +37,12 @@ export type StudioApiOptions = {
     testCaseId?: string;
     prompt: string;
     model: string;
+    projectId?: string;
     settings?: {
       maxTurns: number;
       timeoutSeconds: number;
+      effort?: string;
+      toolPreset?: 'none' | 'read-only';
     };
   }) => Promise<SkillTestRun>;
   cancelTest?: (runId: string) => Promise<SkillTestRun | undefined>;
@@ -142,6 +145,23 @@ export function createStudioApi(options: StudioApiOptions) {
       if (request.method === 'GET' && route.join('/') === 'catalog') {
         return { status: 200, body: { skills: await options.catalog.discover() } };
       }
+      if (request.method === 'POST' && route.join('/') === 'skills') {
+        const body = bodyRecord(request.body);
+        const scope = string(body.scope, 'scope');
+        if (scope !== 'personal' && scope !== 'project') {
+          throw new StudioValidationError('scope must be personal or project.');
+        }
+        const skill = await options.catalog.createSkill(
+          {
+            scope,
+            projectId: string(body.projectId, 'projectId', false),
+            name: string(body.name, 'name')!,
+            description: string(body.description, 'description')!,
+          },
+          mutationCapability(request),
+        );
+        return { status: 201, body: { skill } };
+      }
       if (request.method === 'GET' && route[0] === 'skills' && route.length === 2) {
         return { status: 200, body: { skill: await options.catalog.getSkill(route[1]!) } };
       }
@@ -169,18 +189,6 @@ export function createStudioApi(options: StudioApiOptions) {
         return { status: 200, body: { versions: options.catalog.listVersions(route[1]!) } };
       }
       if (
-        request.method === 'GET' &&
-        route[0] === 'skills' &&
-        route[2] === 'versions' &&
-        route[4] === 'diff' &&
-        route.length === 5
-      ) {
-        return {
-          status: 200,
-          body: { diff: await options.catalog.versionDiff(route[1]!, route[3]!) },
-        };
-      }
-      if (
         request.method === 'POST' &&
         route[0] === 'skills' &&
         route[2] === 'drafts' &&
@@ -199,24 +207,6 @@ export function createStudioApi(options: StudioApiOptions) {
         );
         return { status: 201, body: { version } };
       }
-      if (
-        request.method === 'POST' &&
-        route[0] === 'skills' &&
-        route[2] === 'promote' &&
-        route.length === 3
-      ) {
-        const body = bodyRecord(request.body);
-        return {
-          status: 200,
-          body: await options.catalog.promote({
-            skillId: route[1]!,
-            versionId: string(body.versionId, 'versionId')!,
-            baseRevision: string(body.baseRevision, 'baseRevision')!,
-            capability: mutationCapability(request),
-          }),
-        };
-      }
-
       if (
         request.method === 'GET' &&
         route[0] === 'skills' &&
@@ -283,6 +273,7 @@ export function createStudioApi(options: StudioApiOptions) {
           testCaseId: string(body.testCaseId, 'testCaseId', false),
           prompt: string(body.prompt, 'prompt')!,
           model: string(body.model, 'model')!,
+          projectId: string(body.projectId, 'projectId', false),
           settings:
             isRecord(body.settings) &&
             typeof body.settings.maxTurns === 'number' &&
@@ -290,6 +281,9 @@ export function createStudioApi(options: StudioApiOptions) {
               ? {
                   maxTurns: body.settings.maxTurns,
                   timeoutSeconds: body.settings.timeoutSeconds,
+                  effort:
+                    typeof body.settings.effort === 'string' ? body.settings.effort : undefined,
+                  toolPreset: body.settings.toolPreset === 'read-only' ? 'read-only' : 'none',
                 }
               : undefined,
         });

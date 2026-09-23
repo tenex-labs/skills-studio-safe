@@ -100,9 +100,9 @@ describe('SkillCatalog discovery', () => {
   });
 });
 
-describe('SkillCatalog versions and promotion', () => {
-  it('deduplicates baselines, creates drafts, detects conflicts, and promotes atomically', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'skill-promotion-'));
+describe('SkillCatalog versions', () => {
+  it('deduplicates baselines and saves Studio versions without changing installed files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skill-versions-'));
     const personal = join(root, 'personal');
     await skill(personal, 'editable', 'Before');
     const studio = catalog(personal);
@@ -120,7 +120,7 @@ describe('SkillCatalog versions and promotion', () => {
       },
       { path: 'notes.md', content: 'new file\n', mode: 0o644 },
     ];
-    const draft = studio.createDraft(
+    studio.createDraft(
       {
         skillId: summary!.id,
         baseRevision: summary!.revision,
@@ -130,43 +130,21 @@ describe('SkillCatalog versions and promotion', () => {
       'test-capability',
     );
 
-    await writeFile(join(personal, 'editable', 'SKILL.md'), 'external change');
-    await expect(
-      studio.promote({
-        skillId: summary!.id,
-        versionId: draft.id,
-        baseRevision: summary!.revision,
-        capability: 'test-capability',
-      }),
-    ).rejects.toBeInstanceOf(RevisionConflictError);
-
-    await writeFile(
-      join(personal, 'editable', 'SKILL.md'),
-      '---\nname: editable\ndescription: Before\n---\n# editable\n',
-    );
-    const current = await studio.getSkill(summary!.id);
-    const promoted = await studio.promote({
-      skillId: summary!.id,
-      versionId: draft.id,
-      baseRevision: current.revision,
-      capability: 'test-capability',
-    });
-
-    expect(promoted.diff).toEqual({ added: ['notes.md'], modified: ['SKILL.md'], deleted: [] });
-    expect(await readFile(join(personal, 'editable', 'SKILL.md'), 'utf8')).toContain(
-      'description: After',
-    );
-    expect(await readFile(join(personal, 'editable', 'notes.md'), 'utf8')).toBe('new file\n');
-
-    const rollback = await studio.promote({
-      skillId: summary!.id,
-      versionId: baseline!.id,
-      baseRevision: promoted.skill.revision,
-      capability: 'test-capability',
-    });
-    expect(rollback.diff.deleted).toEqual(['notes.md']);
+    expect(studio.listVersions(summary!.id)).toHaveLength(2);
     expect(await readFile(join(personal, 'editable', 'SKILL.md'), 'utf8')).toContain(
       'description: Before',
     );
+    await expect(readFile(join(personal, 'editable', 'notes.md'), 'utf8')).rejects.toThrow();
+    expect(() =>
+      studio.createDraft(
+        {
+          skillId: summary!.id,
+          baseRevision: 'missing-revision',
+          files,
+          label: 'Conflicting draft',
+        },
+        'test-capability',
+      ),
+    ).toThrow(RevisionConflictError);
   });
 });

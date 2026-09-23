@@ -1,15 +1,7 @@
-import type {
-  SkillFile,
-  SkillPackage,
-  SkillSummary,
-  SkillTestRun,
-  SkillVersion,
-  StudioReadiness,
-  ValidationFinding,
-} from '../../domain/index';
+import type { SkillFile, SkillSummary, SkillTestRun, StudioReadiness } from '../../domain/index';
 
 export type LoadState = 'loading' | 'ready' | 'error';
-export type StudioView = 'library' | 'editor' | 'test-lab' | 'compare';
+export type StudioView = 'library' | 'editor' | 'test-lab';
 
 export const unavailableReadiness: StudioReadiness = {
   claude: { available: false, authenticated: false },
@@ -111,43 +103,4 @@ export function formatTokens(run?: SkillTestRun): string {
 
 export function formatCost(run?: SkillTestRun): string {
   return run?.usage?.costUsd === undefined ? 'Unavailable' : `$${run.usage.costUsd.toFixed(4)}`;
-}
-
-export type ComparisonCandidate =
-  | { kind: 'version'; id: string; label: string; version: SkillVersion; skill?: SkillPackage }
-  | { kind: 'run'; id: string; label: string; run: SkillTestRun; findings?: ValidationFinding[] };
-
-export function comparisonRows(candidate?: ComparisonCandidate) {
-  if (!candidate) return undefined;
-  if (candidate.kind === 'version') {
-    const validation = candidate.skill?.validation;
-    return {
-      validation: validation ? validationLabel(validation) : 'Unavailable',
-      output: 'Not applicable to a version',
-      assertions: 'Not applicable to a version',
-      model: 'Unavailable',
-      duration: 'Unavailable',
-      tokens: 'Unavailable',
-      cost: 'Unavailable',
-      notes: candidate.version.note || 'No notes',
-    };
-  }
-  const { run } = candidate;
-  return {
-    validation: candidate.findings
-      ? `${candidate.findings.filter(({ severity }) => severity === 'error').length} errors, ${candidate.findings.filter(({ severity }) => severity === 'warning').length} warnings`
-      : 'Unavailable',
-    output: run.output || 'Unavailable',
-    assertions:
-      run.assertions.length === 0
-        ? 'Unavailable'
-        : run.assertions
-            .map((item) => `${item.passed ? 'Pass' : 'Fail'}: ${item.label}`)
-            .join(' · '),
-    model: run.model || 'Unavailable',
-    duration: formatDuration(run.durationMs),
-    tokens: formatTokens(run),
-    cost: formatCost(run),
-    notes: `Status: ${run.status}`,
-  };
 }

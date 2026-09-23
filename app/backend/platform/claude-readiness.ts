@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 
 export type ClaudeReadiness = {
   available: boolean;
@@ -121,4 +121,44 @@ export async function getClaudeReadiness(
     authenticated: isAuthenticated(authResult.stdout, authResult.exitCode),
     version,
   };
+}
+
+let activeLogin: ChildProcess | undefined;
+let loginState: {
+  state: 'idle' | 'running' | 'completed' | 'failed';
+  finishedAt?: string;
+} = { state: 'idle' };
+
+export function startClaudeLogin(): { started: boolean } {
+  if (activeLogin && activeLogin.exitCode === null) return { started: false };
+  loginState = { state: 'running' };
+  activeLogin = spawn('claude', ['auth', 'login'], {
+    env: createClaudeEnvironment(),
+    stdio: 'inherit',
+    shell: false,
+  });
+  activeLogin.once('exit', (code) => {
+    loginState = {
+      state: code === 0 ? 'completed' : 'failed',
+      finishedAt: new Date().toISOString(),
+    };
+    activeLogin = undefined;
+  });
+  activeLogin.once('error', () => {
+    loginState = { state: 'failed', finishedAt: new Date().toISOString() };
+    activeLogin = undefined;
+  });
+  return { started: true };
+}
+
+export function getClaudeLoginState() {
+  return { ...loginState };
+}
+
+export function stopClaudeLogin(): void {
+  if (activeLogin && activeLogin.exitCode === null) activeLogin.kill('SIGTERM');
+  activeLogin = undefined;
+  if (loginState.state === 'running') {
+    loginState = { state: 'failed', finishedAt: new Date().toISOString() };
+  }
 }

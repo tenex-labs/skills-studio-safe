@@ -1,7 +1,6 @@
-import { Beaker, BookOpen, Braces, GitCompareArrows } from 'lucide-react';
+import { Beaker, BookOpen, Braces } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { useEffect, useState } from 'react';
-import { CompareView } from '../features/compare/CompareView';
 import { EditorView } from '../features/editor/EditorView';
 import { LibraryView } from '../features/library/LibraryView';
 import { TestLabView } from '../features/test-lab/TestLabView';
@@ -17,7 +16,6 @@ const routes: Array<{
   { view: 'library', label: 'Library', icon: BookOpen },
   { view: 'editor', label: 'Editor', icon: Braces },
   { view: 'test-lab', label: 'Test Lab', icon: Beaker },
-  { view: 'compare', label: 'Compare', icon: GitCompareArrows },
 ];
 
 function viewFromLocation(): StudioView {
@@ -28,8 +26,6 @@ function viewFromLocation(): StudioView {
 export default function App() {
   const studio = useStudio();
   const [view, setView] = useState<StudioView>(viewFromLocation);
-  const [leftCompareId, setLeftCompareId] = useState('');
-  const [rightCompareId, setRightCompareId] = useState('');
 
   useEffect(() => {
     const onPopState = () => setView(viewFromLocation());
@@ -83,6 +79,12 @@ export default function App() {
             demoMode={studio.demoMode}
             onScopeChange={(scope, projectId) => void studio.loadCatalog(scope, projectId)}
             onRegisterProject={studio.registerProject}
+            onPickProject={studio.pickProject}
+            onCreateSkill={(input) =>
+              studio.createSkill(input).then(() => {
+                navigate('editor');
+              })
+            }
             onOpen={(skill) => {
               void studio.openSkill(skill.id).then(() => navigate('editor'));
             }}
@@ -93,33 +95,25 @@ export default function App() {
             key={studio.selectedSkill?.id ?? 'empty-editor'}
             skill={studio.selectedSkill}
             versions={studio.versions}
-            onCreateVersion={studio.createVersion}
-            onPromote={studio.promoteVersion}
+            onSave={studio.saveSkill}
           />
         )}
         {view === 'test-lab' && (
           <TestLabView
             key={studio.selectedSkill?.id ?? 'empty-test-lab'}
             skill={studio.selectedSkill}
+            skills={studio.allSkills}
+            projects={studio.projects}
+            catalogState={studio.catalogState}
             versions={studio.versions}
-            testCases={studio.testCases}
             runs={studio.runs}
-            traces={studio.traces}
+            tracesByRun={studio.tracesByRun}
             readiness={studio.readiness}
             demoMode={studio.demoMode}
             onLaunch={studio.launchTest}
             onCancel={studio.cancelTest}
-          />
-        )}
-        {view === 'compare' && (
-          <CompareView
-            skill={studio.selectedSkill}
-            versions={studio.versions}
-            runs={studio.runs}
-            leftId={leftCompareId}
-            rightId={rightCompareId}
-            onLeftChange={setLeftCompareId}
-            onRightChange={setRightCompareId}
+            onReauthenticate={studio.reauthenticateClaude}
+            onSkillChange={studio.openSkill}
           />
         )}
       </main>

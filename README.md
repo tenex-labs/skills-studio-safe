@@ -23,12 +23,18 @@ npm run preflight
 ## Product areas
 
 - **Library** catalogs installed personal and trusted-project skills and reports conflicts.
-- **Editor** supports a draft-test-promote loop without treating a draft as installed.
-- **Test Lab** stores reusable test cases and runs bounded, no-tools checks through `claude -p`.
-- **Compare** evaluates saved results across skill versions and test cases.
+- **Editor** saves through confirmation with automatic version history and rollback.
+- **Test Lab** runs two bounded configurations against one prompt and aligns their outputs,
+  assertions, usage, and timing.
+
+Test Lab includes Claude Code's moving family aliases, 1M-context and hybrid aliases, current pinned
+Fable/Opus/Sonnet/Haiku IDs, supported legacy versions, and effort levels from low through max
+(plus Ultracode on compatible Claude Code versions). Organization and provider restrictions still
+determine which selections can run.
 
 The app uses the Claude CLI's existing authentication. It does not collect credentials, mint tokens,
-or add a second sign-in flow.
+or add a second sign-in flow. If Claude reports an expired OAuth token, Test Lab can launch the
+official `claude auth login` flow; credentials remain owned by Claude Code.
 
 ## Personal and project skills
 
@@ -37,6 +43,7 @@ The filesystem is the installed authority:
 - `~/.claude/skills/<name>/SKILL.md` is a personal installed skill.
 - `<trusted-project>/.claude/skills/<name>/SKILL.md` is a project installed skill.
 - An untrusted project is never scanned or modified.
+- Project registration uses the operating system's native folder picker followed by explicit trust.
 - In a trusted project context, a personal skill with the same name takes precedence over the
   project skill. The Library shows both sources and the effective winner; it does not silently
   merge them.
@@ -44,17 +51,17 @@ The filesystem is the installed authority:
 Trust is an explicit local choice recorded by the application. Trusting one project does not trust
 its parent, siblings, remotes, or future clones.
 
-## Draft, test, promote
+## Edit, test, save
 
-1. Select an installed skill or start a draft.
-2. Edit and validate the draft without changing the installed file.
-3. Run one or more saved test cases through bounded `claude -p` processes with tools disabled.
-4. Inspect the final result, assertions, timing, and any available partial trace.
-5. Compare saved results when useful.
-6. Promote an approved draft by writing the chosen personal or trusted-project `SKILL.md`.
+1. Select or create a personal or project skill.
+2. Edit Markdown and preview it in one tabbed content area.
+3. Choose the skill directly in Test Lab, enter one prompt, and configure two versions/models.
+4. Run both configurations and compare readable output, assertions, timing, usage, and cost.
+5. Save the winner to local Studio version history after confirmation; installed files stay
+   untouched.
 
-Promotion creates an immutable version record before replacing an existing installed file. A saved
-result remains linked to the exact version and test case that produced it.
+Managed or symlinked skills remain protected. Editing one creates an explicitly named personal copy
+with its own version history instead of silently overwriting the managed source.
 
 ## Local data and privacy
 
@@ -78,8 +85,7 @@ deployment, or remote telemetry. See [`docs/privacy.md`](docs/privacy.md) for th
 
 - If the catalog looks stale, rescan the filesystem; do not reconstruct installed skills from the
   database.
-- If a promoted file is wrong, restore the previous immutable version through an explicit recovery
-  action and write it back to the intended scope.
+- If a saved version is wrong, select another immutable version for the next experiment.
 - Back up SQLite with its documented backup procedure while the app is stopped or through the
   implementation's consistent backup command.
 - If a run is interrupted, discard the partial trace. Completed terminal results belong in history.

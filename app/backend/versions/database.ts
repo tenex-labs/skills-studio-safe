@@ -84,6 +84,12 @@ const migrations = [
     CREATE INDEX test_cases_by_skill ON test_cases(skill_id, created_at);
     CREATE INDEX test_runs_by_skill ON test_runs(skill_id, started_at DESC);
   `,
+  `
+    ALTER TABLE test_runs ADD COLUMN effort TEXT;
+    ALTER TABLE test_runs ADD COLUMN project_id TEXT;
+    ALTER TABLE test_runs ADD COLUMN workspace_label TEXT;
+    ALTER TABLE test_runs ADD COLUMN tool_preset TEXT;
+  `,
 ] as const;
 
 type TrustedProjectRow = {
@@ -137,6 +143,10 @@ type TestRunRow = {
   test_case_id: string | null;
   prompt: string;
   model: string;
+  effort: string | null;
+  project_id: string | null;
+  workspace_label: string | null;
+  tool_preset: SkillTestRun['toolPreset'] | null;
   status: SkillTestRun['status'];
   started_at: string | null;
   finished_at: string | null;
@@ -389,11 +399,13 @@ export class StudioDatabase {
     this.connection
       .prepare(
         `INSERT INTO test_runs(
-          id, skill_id, version_id, test_case_id, prompt, model, status, started_at, finished_at,
-          duration_ms, exit_code, output, usage_json, assertions_json
+          id, skill_id, version_id, test_case_id, prompt, model, effort, project_id,
+          workspace_label, tool_preset, status, started_at, finished_at, duration_ms, exit_code,
+          output, usage_json, assertions_json
         ) VALUES (
-          @id, @skillId, @versionId, @testCaseId, @prompt, @model, @status, @startedAt, @finishedAt,
-          @durationMs, @exitCode, @output, @usage, @assertions
+          @id, @skillId, @versionId, @testCaseId, @prompt, @model, @effort, @projectId,
+          @workspaceLabel, @toolPreset, @status, @startedAt, @finishedAt, @durationMs, @exitCode,
+          @output, @usage, @assertions
         ) ON CONFLICT(id) DO UPDATE SET status = excluded.status, started_at = excluded.started_at,
           finished_at = excluded.finished_at, duration_ms = excluded.duration_ms,
           exit_code = excluded.exit_code, output = excluded.output, usage_json = excluded.usage_json,
@@ -402,6 +414,10 @@ export class StudioDatabase {
       .run({
         ...run,
         testCaseId: run.testCaseId ?? null,
+        effort: run.effort ?? null,
+        projectId: run.projectId ?? null,
+        workspaceLabel: run.workspaceLabel ?? null,
+        toolPreset: run.toolPreset ?? null,
         startedAt: run.startedAt ?? null,
         finishedAt: run.finishedAt ?? null,
         durationMs: run.durationMs ?? null,
@@ -428,6 +444,10 @@ export class StudioDatabase {
       ...(row.test_case_id ? { testCaseId: row.test_case_id } : {}),
       prompt: row.prompt,
       model: row.model,
+      ...(row.effort ? { effort: row.effort } : {}),
+      ...(row.project_id ? { projectId: row.project_id } : {}),
+      ...(row.workspace_label ? { workspaceLabel: row.workspace_label } : {}),
+      ...(row.tool_preset ? { toolPreset: row.tool_preset } : {}),
       status: row.status,
       ...(row.started_at ? { startedAt: row.started_at } : {}),
       ...(row.finished_at ? { finishedAt: row.finished_at } : {}),

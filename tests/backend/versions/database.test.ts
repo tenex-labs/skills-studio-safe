@@ -12,12 +12,12 @@ describe('StudioDatabase', () => {
     const path = join(root, 'studio.sqlite');
     const first = new StudioDatabase(path);
 
-    expect(first.connection.pragma('user_version', { simple: true })).toBe(1);
+    expect(first.connection.pragma('user_version', { simple: true })).toBe(2);
     expect(first.connection.pragma('journal_mode', { simple: true })).toBe('wal');
     first.close();
 
     const reopened = new StudioDatabase(path);
-    expect(reopened.connection.pragma('user_version', { simple: true })).toBe(1);
+    expect(reopened.connection.pragma('user_version', { simple: true })).toBe(2);
     expect(
       reopened.connection
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")

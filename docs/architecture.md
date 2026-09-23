@@ -9,7 +9,7 @@ personal ~/.claude/skills ───────┐
 trusted project .claude/skills ──┴─> catalog scanner ─> Library / Editor
                                              |
                                              v
-                                explicit promote writes SKILL.md
+                                  save version to SQLite
 
 draft + immutable version + test case
                   |
@@ -20,7 +20,7 @@ draft + immutable version + test case
                   |
         completed final result
                   v
-          SQLite -> Compare
+          SQLite -> Test Lab comparison
 ```
 
 ## Authority and persistence
@@ -29,9 +29,8 @@ The data classes must not blur:
 
 - **Installed files:** current `SKILL.md` files are the authority for what is installed. A catalog
   record is a cache/index, not proof that a file still exists.
-- **Version database:** SQLite stores append-only skill-version snapshots, reusable test cases,
-  trusted project roots, and supporting metadata. Updating an installed skill creates a new version;
-  it does not mutate old version content.
+- **Version database:** SQLite stores append-only skill-version snapshots, trusted project roots,
+  and supporting metadata. Saving in Editor never mutates installed skill files.
 - **Ephemeral traces:** accepted runner progress events exist only for the active process and SSE
   subscribers. Disconnecting the browser may lose them. They are not automatically stored.
 - **Saved results:** completed terminal results become durable SQLite records. Each references the
@@ -39,8 +38,9 @@ The data classes must not blur:
 
 ## Catalog and precedence
 
-The catalog scans `~/.claude/skills` and only project roots the user explicitly trusted. It validates
-that resolved paths stay within the expected skills root and does not follow an escaping symlink.
+The catalog scans `~/.claude/skills` and only project roots the user selected with the native folder
+picker and explicitly trusted. It validates that resolved paths stay within the expected skills root
+and does not follow an escaping symlink.
 Malformed skills appear as actionable validation findings rather than disappearing.
 
 Personal and project skills are separate installations. In the context of a trusted project, a
@@ -51,18 +51,24 @@ merged automatically.
 ## Product areas
 
 - **Library:** sources, scope, validity, precedence, conflict, installed state, and rescan.
-- **Editor:** draft text, validation findings, immutable version history, and explicit promotion.
-- **Test Lab:** test-case presets, bounded runner state, transient trace, assertions, and final result.
-- **Compare:** side-by-side saved results with version/test provenance and assertion differences.
+- **Editor:** tabbed Markdown/preview editing, validation findings, confirmed local saves, immutable
+  version history, and editable working copies of managed sources.
+- **Test Lab:** shared test input, two independently configured bounded runs, readable outputs,
+  transient trace details, aligned metadata, assertions, and saved final results.
 
 ## Runner boundary
 
 The server starts `claude -p` directly as a child process. It reuses the Claude CLI's existing
 authentication and supplies no API key. Every run has a fixed timeout, output limit, cancellation
-path, and tools-disabled configuration. Input is passed without shell interpolation. The runner
+path, and either no tools or a read-only trusted-workspace preset. Input is passed without shell
+interpolation. The runner
 captures structured progress where available, emits a small normalized event model over SSE, and
 produces one terminal outcome. A timeout, cancellation, spawn failure, or malformed event is a
 first-class terminal state.
+
+OAuth remains Claude Code's responsibility. When a run reports an expired token, the server may
+launch the official `claude auth login` process, but it never reads or stores the resulting
+credentials.
 
 The browser never starts processes or accesses skill files directly. The server validates all API
 input and owns catalog, filesystem, SQLite, and process I/O.
@@ -70,8 +76,7 @@ input and owns catalog, filesystem, SQLite, and process I/O.
 ## Consistency and recovery
 
 - Rescan files after external edits; filesystem state wins for installed content.
-- Before replacing an installed file, snapshot the previous valid content as an immutable version.
-- Write promotion through a temporary file and atomic rename where the platform permits.
+- Never replace an installed skill from Editor; save working copies to SQLite version history.
 - Use SQLite transactions for linked version, test, assertion, and saved-result records.
 - On startup, mark abandoned running records interrupted without inventing a final result.
 - Do not reconstruct an installed skill from SQLite except through an explicit user recovery action.

@@ -25,6 +25,13 @@ export type SkillTestLaunch = {
   settings?: {
     maxTurns: number;
     timeoutSeconds: number;
+    effort?: string;
+    toolPreset?: 'none' | 'read-only';
+  };
+  workspace?: {
+    id: string;
+    label: string;
+    path: string;
   };
 };
 
@@ -97,12 +104,14 @@ type RunRecord = {
   commandName: string;
   child?: SkillRunnerChild;
   projectDirectory?: string;
+  workspacePath?: string;
   timeout?: NodeJS.Timeout;
   killTimeout?: NodeJS.Timeout;
   lineBuffer: string;
   output: string;
   resultSeen: boolean;
   resultFailed: boolean;
+  initialized: boolean;
   sawPartialText: boolean;
   sawMessageStart: boolean;
   assistantTurns: number;
@@ -228,7 +237,7 @@ function validateLaunch(input: SkillTestLaunch): void {
   if (!input.prompt.trim() || input.prompt.length > MAX_PROMPT_LENGTH) {
     throw new Error('Prompt must be non-empty and at most 32,000 characters');
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.model)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/.test(input.model)) {
     throw new Error('Model must be a Claude model name or alias');
   }
   if (input.skill.files.length === 0 || input.skill.files.length > 100) {
@@ -352,12 +361,17 @@ export class SkillTestRunner {
     const identity = sourceIdentity(input.skill);
     const maxTurns = input.settings?.maxTurns ?? this.#maxTurns;
     const timeoutMs = input.settings ? input.settings.timeoutSeconds * 1_000 : this.#timeoutMs;
+    const effort = input.settings?.effort ?? 'high';
+    const toolPreset = input.settings?.toolPreset ?? 'none';
     if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 20) {
       throw new Error('Turn limit must be between 1 and 20');
     }
     const minimumTimeout = input.settings ? 1_000 : 1;
     if (!Number.isFinite(timeoutMs) || timeoutMs < minimumTimeout || timeoutMs > 300_000) {
       throw new Error('Timeout must be between 1 and 300 seconds');
+    }
+    if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'].includes(effort)) {
+      throw new Error('Unsupported effort level');
     }
     if (input.testCase && input.testCase.skillId !== identity.skillId) {
       throw new Error('Test case must belong to the selected skill');
@@ -369,18 +383,25 @@ export class SkillTestRunner {
       testCaseId: input.testCase?.id,
       prompt: input.prompt,
       model: input.model,
+      effort,
+      ...(input.workspace
+        ? { projectId: input.workspace.id, workspaceLabel: input.workspace.label }
+        : {}),
+      toolPreset,
       status: 'queued',
       assertions: [],
     };
     this.#records.set(id, {
       run,
       files,
+      workspacePath: input.workspace?.path,
       testCase: input.testCase,
       commandName,
       lineBuffer: '',
       output: '',
       resultSeen: false,
       resultFailed: false,
+      initialized: false,
       sawPartialText: false,
       sawMessageStart: false,
       assistantTurns: 0,
@@ -483,6 +504,8 @@ export class SkillTestRunner {
         '-p',
         '--model',
         record.run.model,
+        '--effort',
+        record.run.effort ?? 'high',
         '--output-format',
         'stream-json',
         '--verbose',
@@ -496,12 +519,15 @@ export class SkillTestRunner {
         '--permission-mode',
         'dontAsk',
         '--tools',
-        '',
+        record.run.toolPreset === 'read-only' ? 'Read,Glob,Grep' : '',
         '--max-budget-usd',
         String(this.#maxBudgetUsd),
       ];
+      if (record.workspacePath) {
+        args.push('--add-dir', record.projectDirectory);
+      }
       const child = this.#spawn('claude', args, {
-        cwd: record.projectDirectory,
+        cwd: record.workspacePath ?? record.projectDirectory,
         env: this.#environment,
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -591,7 +617,10 @@ export class SkillTestRunner {
       return;
     }
     if (type === 'system') {
-      this.#addTrace(record.run.id, 'process', { state: 'initialized' });
+      if (!record.initialized) {
+        record.initialized = true;
+        this.#addTrace(record.run.id, 'process', { state: 'initialized' });
+      }
     }
   }
 

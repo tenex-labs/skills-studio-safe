@@ -13,7 +13,7 @@ function jsonResponse(value: unknown): Response {
 }
 
 async function openDemoSkill(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByText('Workshop demo data');
+  await screen.findByText('Demo data');
   await user.click(screen.getByRole('button', { name: /code-review/i }));
   await screen.findByRole('heading', { name: 'code-review' });
 }
@@ -34,7 +34,7 @@ describe('Claude Skill Studio', () => {
 
     expect(screen.getByRole('heading', { name: 'Skill library' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
-    expect(await screen.findByText('Workshop demo data')).toBeInTheDocument();
+    expect(await screen.findByText('Demo data')).toBeInTheDocument();
     expect(
       screen.getByText('Readiness unavailable. Editing and demo browsing remain available.'),
     ).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('Claude Skill Studio', () => {
     expect(screen.getByText('Try a broader search.')).toBeInTheDocument();
   });
 
-  it('tracks editor dirtiness, creates a draft, and confirms promotion', async () => {
+  it('tracks editor dirtiness and confirms a direct versioned save', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('API unavailable')));
     const user = userEvent.setup();
     render(<App />);
@@ -54,25 +54,15 @@ describe('Claude Skill Studio', () => {
     const editor = screen.getByRole('textbox', { name: 'File content' });
     await user.type(editor, '\nNew review instruction.');
     expect(screen.getByText('Unsaved draft changes')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create draft' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    const saveDialog = screen.getByRole('dialog', { name: 'Save this version?' });
+    await user.click(within(saveDialog).getByRole('button', { name: 'Save changes' }));
 
-    const draftDialog = screen.getByRole('dialog', { name: 'Create immutable draft' });
-    await user.type(within(draftDialog).getByLabelText('Version label'), 'Workshop revision');
-    await user.type(within(draftDialog).getByLabelText('Note (optional)'), 'Adds review guidance.');
-    await user.click(within(draftDialog).getByRole('button', { name: 'Create draft' }));
-
-    expect(await screen.findByText(/Draft “Workshop revision” created/)).toBeInTheDocument();
+    expect(await screen.findByText(/Version saved in Skill Studio/)).toBeInTheDocument();
     expect(screen.getByText('Working copy clean')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'Promote' })[0]);
-    const promoteDialog = screen.getByRole('dialog', { name: 'Promote version?' });
-    expect(
-      within(promoteDialog).getByText(/changes which immutable package is installed/i),
-    ).toBeInTheDocument();
-    await user.click(within(promoteDialog).getByRole('button', { name: 'Promote version' }));
-    expect(await screen.findByText(/promoted after confirmation/i)).toBeInTheDocument();
   });
 
-  it('launches, streams, pauses, and cancels a local test', async () => {
+  it('runs two configurations and presents readable aligned results', async () => {
     class MockEventSource {
       static instances: MockEventSource[] = [];
       onmessage: ((event: MessageEvent<string>) => void) | null = null;
@@ -86,15 +76,8 @@ describe('Claude Skill Studio', () => {
       }
     }
 
-    const running = {
-      id: 'run-1',
-      skillId: demoSkills[0].id,
-      versionId: demoVersions[0].id,
-      prompt: 'Review this sample.',
-      model: 'claude-sonnet',
-      status: 'running',
-      assertions: [],
-    };
+    let runNumber = 0;
+    const runningRuns = new Map<string, Record<string, unknown>>();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/studio/readiness') {
@@ -117,18 +100,37 @@ describe('Claude Skill Studio', () => {
         return jsonResponse({ testRuns: [] });
       }
       if (path === '/api/studio/test-runs' && init?.method === 'POST') {
-        return jsonResponse({ testRun: running });
+        runNumber += 1;
+        const body = JSON.parse(String(init.body)) as {
+          versionId: string;
+          prompt: string;
+          model: string;
+        };
+        const run = {
+          id: `run-${runNumber}`,
+          skillId: demoSkills[0].id,
+          versionId: body.versionId,
+          prompt: body.prompt,
+          model: body.model,
+          status: 'running',
+          assertions: [],
+        };
+        runningRuns.set(run.id, run);
+        return jsonResponse({ testRun: run });
       }
       if (path.endsWith('/cancel')) {
-        return jsonResponse({ testRun: { ...running, status: 'cancelled' } });
+        const id = path.split('/').at(-2)!;
+        return jsonResponse({ testRun: { ...runningRuns.get(id), id, status: 'cancelled' } });
       }
-      if (path === '/api/studio/test-runs/run-1') {
+      if (path.startsWith('/api/studio/test-runs/run-')) {
+        const id = path.split('/').at(-1)!;
         return jsonResponse({
           testRun: {
-            ...running,
+            ...runningRuns.get(id),
+            id,
             status: 'passed',
             durationMs: 800,
-            output: 'A focused finding.',
+            output: id === 'run-1' ? 'Sonnet finding.' : 'Haiku finding.',
             assertions: [{ label: 'Has finding', passed: true }],
           },
         });
@@ -144,41 +146,57 @@ describe('Claude Skill Studio', () => {
     await user.click(screen.getByRole('button', { name: /code-review/i }));
     await screen.findByRole('heading', { name: 'code-review' });
     await user.click(screen.getByRole('link', { name: 'Test Lab' }));
-    expect(screen.getByText(/Normal skill tests run without tools/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Prompt'), 'Review this sample.');
-    await user.click(screen.getByRole('button', { name: 'Launch test' }));
+    await user.click(screen.getByRole('button', { name: 'Run both' }));
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
     expect(MockEventSource.instances[0].url).toBe('/api/studio/test-runs/run-1/events');
     MockEventSource.instances[0].emit({
       id: 'trace-1',
       timestamp: '2026-09-22T14:00:00Z',
       kind: 'assistant',
-      text: 'Checking the response.',
+      text: 'Sonnet finding.',
     });
-    expect(await screen.findByText('Checking the response.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Pause live trace' }));
-    expect(screen.getByRole('button', { name: 'Resume live trace' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Cancel test' }));
-    expect(await screen.findByText('cancelled')).toBeInTheDocument();
-    expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+    MockEventSource.instances[1].emit({
+      id: 'trace-2',
+      timestamp: '2026-09-22T14:00:00Z',
+      kind: 'assistant',
+      text: 'Haiku finding.',
+    });
+    expect(await screen.findByText('Sonnet finding.')).toBeInTheDocument();
+    expect(await screen.findByText('Haiku finding.')).toBeInTheDocument();
+
+    MockEventSource.instances[0].emit({
+      id: 'result-1',
+      timestamp: '2026-09-22T14:00:01Z',
+      kind: 'result',
+      status: 'passed',
+    });
+    MockEventSource.instances[1].emit({
+      id: 'result-2',
+      timestamp: '2026-09-22T14:00:01Z',
+      kind: 'result',
+      status: 'passed',
+    });
+    const comparison = screen.getByRole('region', { name: 'Aligned run metadata' });
+    expect(within(comparison).getByText('Configuration A')).toBeInTheDocument();
+    expect(within(comparison).getByText('Configuration B')).toBeInTheDocument();
   });
 
-  it('compares version and test evidence with unavailable states', async () => {
+  it('keeps version and model menus aligned in the experiment lab', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('API unavailable')));
     const user = userEvent.setup();
     render(<App />);
     await openDemoSkill(user);
-    await user.click(screen.getByRole('link', { name: 'Compare' }));
+    await user.click(screen.getByRole('link', { name: 'Test Lab' }));
 
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'First item' }),
-      `version:${demoVersions[0].id}`,
-    );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Second item' }), 'run:demo-run');
-    const comparison = screen.getByRole('region', { name: 'Skill comparison' });
-    expect(within(comparison).getAllByText('Not applicable to a version')).toHaveLength(2);
-    expect(within(comparison).getByText('410 in / 82 out')).toBeInTheDocument();
-    expect(within(comparison).getByText('$0.0031')).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Configuration A configuration and result' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Configuration B configuration and result' }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Skill version/ })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /Model/ })).toHaveLength(2);
   });
 });

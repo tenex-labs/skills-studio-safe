@@ -1,4 +1,4 @@
-import { AlertTriangle, FileText, FolderPlus, Lock, Search } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Plus, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { SkillScope, SkillSummary, TrustedProject } from '../../../domain/index';
 import {
@@ -7,7 +7,8 @@ import {
   validationLabel,
   type LoadState,
 } from '../../model/skill-view-model';
-import { EmptyState, PageHeading, StatusPill } from '../../ui/components';
+import { EmptyState, Modal, PageHeading } from '../../ui/components';
+import { SelectMenu } from '../../ui/SelectMenu';
 
 export function LibraryView({
   skills,
@@ -18,6 +19,8 @@ export function LibraryView({
   onScopeChange,
   onOpen,
   onRegisterProject,
+  onPickProject,
+  onCreateSkill,
 }: {
   skills: SkillSummary[];
   projects: TrustedProject[];
@@ -27,13 +30,21 @@ export function LibraryView({
   onScopeChange: (scope: SkillScope, projectId?: string) => void;
   onOpen: (skill: SkillSummary) => void;
   onRegisterProject: (input: { label: string; path: string }) => Promise<TrustedProject>;
+  onPickProject: () => Promise<{ label: string; path: string }>;
+  onCreateSkill: (input: {
+    scope: SkillScope;
+    projectId?: string;
+    name: string;
+    description: string;
+  }) => Promise<void>;
 }) {
   const [scope, setScope] = useState<SkillScope>('personal');
   const [projectId, setProjectId] = useState('');
   const [query, setQuery] = useState('');
-  const [registering, setRegistering] = useState(false);
-  const [projectLabel, setProjectLabel] = useState('');
-  const [projectPath, setProjectPath] = useState('');
+  const [registerError, setRegisterError] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [skillName, setSkillName] = useState('');
+  const [skillDescription, setSkillDescription] = useState('');
   const filtered = useMemo(() => filterCatalog(skills, query), [query, skills]);
 
   const chooseScope = (next: SkillScope) => {
@@ -46,21 +57,28 @@ export function LibraryView({
     if (nextId) onScopeChange('project', nextId);
   };
 
-  const register = async () => {
-    const project = await onRegisterProject({ label: projectLabel, path: projectPath });
-    setProjectId(project.id);
-    setRegistering(false);
-    setProjectLabel('');
-    setProjectPath('');
-    onScopeChange('project', project.id);
-  };
-
   return (
     <>
       <PageHeading
         title="Skill library"
         description="Browse installed personal and trusted project skills, validation, and conflicts."
-        action={demoMode ? <StatusPill tone="warning">Workshop demo data</StatusPill> : undefined}
+        action={
+          <div className="button-row">
+            {demoMode && (
+              <span className="quiet-state" data-tone="warning">
+                Demo data
+              </span>
+            )}
+            <button
+              className="button primary"
+              disabled={demoMode || (scope === 'project' && !projectId)}
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus size={17} aria-hidden="true" />
+              New skill
+            </button>
+          </div>
+        }
       />
       {error && (
         <div className="notice warning" role="status">
@@ -79,24 +97,37 @@ export function LibraryView({
         </div>
         {scope === 'project' && (
           <>
-            <label>
-              <span>Trusted project</span>
-              <select
-                aria-label="Trusted project"
-                value={projectId}
-                onChange={(event) => chooseProject(event.target.value)}
-              >
-                <option value="">Choose a project</option>
-                {projects.map((project) => (
-                  <option value={project.id} key={project.id}>
-                    {project.label} ({project.skillCount})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="button secondary" onClick={() => setRegistering((value) => !value)}>
-              <FolderPlus size={17} aria-hidden="true" />
-              Register project
+            <SelectMenu
+              label="Trusted project"
+              value={projectId}
+              placeholder="Choose a project"
+              options={projects.map((project) => ({
+                value: project.id,
+                label: project.label,
+                description: `${project.skillCount} skill${project.skillCount === 1 ? '' : 's'}`,
+              }))}
+              onChange={chooseProject}
+              hideLabel
+            />
+            <button
+              className="button secondary"
+              onClick={() => {
+                setRegisterError('');
+                void onPickProject()
+                  .then((selection) => onRegisterProject(selection))
+                  .then((project) => {
+                    setProjectId(project.id);
+                    onScopeChange('project', project.id);
+                  })
+                  .catch(() =>
+                    setRegisterError(
+                      'The folder picker was cancelled or is unavailable on this computer.',
+                    ),
+                  );
+              }}
+            >
+              <FolderOpen size={17} aria-hidden="true" />
+              Choose project folder
             </button>
           </>
         )}
@@ -111,31 +142,10 @@ export function LibraryView({
           />
         </label>
       </section>
-      {registering && (
-        <section className="panel registration" aria-labelledby="register-title">
-          <h2 id="register-title">Register a trusted project</h2>
-          <p>Only register a local project whose skills you intend to inspect and test.</p>
-          <div className="form-grid">
-            <label>
-              Project label
-              <input
-                value={projectLabel}
-                onChange={(event) => setProjectLabel(event.target.value)}
-              />
-            </label>
-            <label>
-              Local path
-              <input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} />
-            </label>
-            <button
-              className="button primary"
-              disabled={!projectLabel.trim() || !projectPath.trim()}
-              onClick={() => void register()}
-            >
-              Trust and register
-            </button>
-          </div>
-        </section>
+      {registerError && (
+        <p className="notice warning" role="status">
+          {registerError}
+        </p>
       )}
       {state === 'loading' && (
         <EmptyState title="Loading skills">Reading the local catalog…</EmptyState>
@@ -153,50 +163,82 @@ export function LibraryView({
         {filtered.map((skill) => (
           <button className="skill-card" key={skill.id} onClick={() => onOpen(skill)}>
             <div className="skill-card-heading">
-              <span className="skill-icon">
-                <FileText size={18} aria-hidden="true" />
-              </span>
               <span>
                 <strong>{skill.name}</strong>
                 <small>{skill.description}</small>
               </span>
             </div>
             <div className="skill-card-meta">
-              <StatusPill
-                tone={
+              <span>{skill.scope}</span>
+              <span
+                data-state={
                   skill.validation.errors
-                    ? 'danger'
+                    ? 'error'
                     : skill.validation.warnings
                       ? 'warning'
-                      : 'success'
+                      : 'valid'
                 }
               >
                 {validationLabel(skill.validation)}
-              </StatusPill>
-              {skill.shadowedBy && <StatusPill tone="warning">{conflictLabel(skill)}</StatusPill>}
-              {skill.readOnly && (
-                <StatusPill>
-                  <Lock size={12} aria-hidden="true" /> Read-only
-                </StatusPill>
-              )}
+              </span>
+              <span>{skill.readOnly ? 'Managed source' : 'Editable source'}</span>
             </div>
+            {skill.shadowedBy && <p className="skill-conflict">{conflictLabel(skill)}</p>}
             <dl className="card-facts">
               <div>
                 <dt>Source</dt>
-                <dd>{skill.relativePath}</dd>
+                <dd title={skill.sourcePath}>{skill.sourcePath ?? skill.relativePath}</dd>
               </div>
               <div>
                 <dt>Files</dt>
                 <dd>{skill.fileCount}</dd>
               </div>
-              <div>
-                <dt>Revision</dt>
-                <dd>{skill.revision}</dd>
-              </div>
             </dl>
           </button>
         ))}
       </section>
+      {createOpen && (
+        <Modal
+          title="Create a skill"
+          confirmLabel="Create skill"
+          confirmDisabled={!skillName.trim() || !skillDescription.trim()}
+          onClose={() => setCreateOpen(false)}
+          onConfirm={() => {
+            void onCreateSkill({
+              scope,
+              projectId: scope === 'project' ? projectId : undefined,
+              name: skillName,
+              description: skillDescription,
+            }).then(() => {
+              setCreateOpen(false);
+              setSkillName('');
+              setSkillDescription('');
+            });
+          }}
+        >
+          <p>
+            Create this skill in{' '}
+            {scope === 'personal' ? 'your personal library' : 'the selected project'}.
+          </p>
+          <label>
+            Skill name
+            <input
+              autoFocus
+              value={skillName}
+              placeholder="review-small-change"
+              onChange={(event) => setSkillName(event.target.value)}
+            />
+          </label>
+          <label>
+            Description
+            <textarea
+              value={skillDescription}
+              placeholder="What this skill does and when Claude should use it"
+              onChange={(event) => setSkillDescription(event.target.value)}
+            />
+          </label>
+        </Modal>
+      )}
     </>
   );
 }

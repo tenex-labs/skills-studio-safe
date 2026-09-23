@@ -9,10 +9,11 @@ state; SQLite owns immutable versions, test cases, and saved final results. Acti
 are ephemeral and may be streamed over SSE, but must not become implicit history.
 
 Use direct `claude -p` with the user's existing CLI authentication for bounded, no-tools tests.
-Never read credentials, silently trust projects, enable tools, add cloud sync, or claim a draft is
-installed before promotion. Cursor skills, deployment, and application authentication are deferred.
+Never read credentials, silently trust projects, enable write tools, add cloud sync, or imply that a
+Studio version overwrites an installed skill. Cursor skills, deployment, and application
+authentication are deferred.
 
-Keep Library, Editor, Test Lab, and Compare behavior accessible and explicit about scope,
+Keep Library, Editor, and two-lane Test Lab behavior accessible and explicit about scope,
 precedence, conflicts, run state, and persistence. Run focused tests and then `npm run preflight`.
 Preserve unrelated working-tree changes and review for credentials,
 machine-specific paths, database files, traces, and result content before handoff.

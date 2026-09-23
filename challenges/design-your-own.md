@@ -24,7 +24,7 @@ Ask only questions whose answers would materially change the slice.
 - Keep installed files, immutable versions, test cases, ephemeral traces, and saved results distinct.
 - Do not add Cursor skills, application auth, cloud services, deployment, or tool-enabled runs.
 - Never trust a project implicitly or merge same-name skill content.
-- Choose an existing Library, Editor, Test Lab, Compare, catalog, storage, or runner seam.
+- Choose an existing Library, Editor, Test Lab, catalog, storage, or runner seam.
 - Prefer one vertical slice with focused tests over placeholders.
 
 ## Acceptance

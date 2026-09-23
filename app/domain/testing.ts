@@ -32,6 +32,10 @@ export type SkillTestRun = {
   testCaseId?: string;
   prompt: string;
   model: string;
+  effort?: string;
+  projectId?: string;
+  workspaceLabel?: string;
+  toolPreset?: 'none' | 'read-only';
   status: SkillTestStatus;
   startedAt?: string;
   finishedAt?: string;

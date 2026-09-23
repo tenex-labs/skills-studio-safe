@@ -1,18 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 
 import type {
   SkillFile,
@@ -44,28 +33,18 @@ export type CatalogOptions = {
 };
 
 export type RegisterProjectInput = { path: string; label?: string; trust: true };
+export type CreateSkillInput = {
+  scope: SkillSummary['scope'];
+  projectId?: string;
+  name: string;
+  description: string;
+};
 export type CreateDraftInput = {
   skillId: string;
   baseRevision: string;
   files: SkillFile[];
   label: string;
   note?: string;
-};
-export type PromoteInput = {
-  skillId: string;
-  versionId: string;
-  baseRevision: string;
-  capability: string;
-};
-export type PackageDiff = {
-  added: string[];
-  modified: string[];
-  deleted: string[];
-};
-export type PromotionResult = {
-  skill: SkillPackage;
-  version: SkillVersion;
-  diff: PackageDiff;
 };
 
 function hash(value: string): string {
@@ -178,59 +157,6 @@ function summarize(
   return { ...summary, files: packageData.files, findings: validation.findings };
 }
 
-function diffFiles(current: readonly SkillFile[], next: readonly SkillFile[]): PackageDiff {
-  const oldFiles = new Map(current.map((file) => [file.path, file]));
-  const newFiles = new Map(next.map((file) => [file.path, file]));
-  return {
-    added: [...newFiles.keys()].filter((path) => !oldFiles.has(path)).sort(),
-    modified: [...newFiles.keys()]
-      .filter((path) => {
-        const old = oldFiles.get(path);
-        const nextFile = newFiles.get(path);
-        return old && nextFile && (old.content !== nextFile.content || old.mode !== nextFile.mode);
-      })
-      .sort(),
-    deleted: [...oldFiles.keys()].filter((path) => !newFiles.has(path)).sort(),
-  };
-}
-
-async function writePackageAtomically(
-  packagePath: string,
-  files: readonly SkillFile[],
-): Promise<void> {
-  for (const file of files) {
-    if (!safeRelativePath(file.path))
-      throw new StudioValidationError('Version contains an invalid file path.');
-  }
-  const parent = dirname(packagePath);
-  const token = randomUUID();
-  const staging = join(parent, `.skill-staging-${token}`);
-  const backup = join(parent, `.skill-backup-${token}`);
-  let movedOriginal = false;
-  await mkdir(staging, { recursive: false });
-  try {
-    for (const file of files) {
-      const target = resolve(staging, file.path);
-      if (!contained(staging, target))
-        throw new StudioValidationError('Version contains an invalid file path.');
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, file.content, 'utf8');
-      await chmod(target, file.mode & 0o777);
-    }
-    await rename(packagePath, backup);
-    movedOriginal = true;
-    await rename(staging, packagePath);
-    await rm(backup, { recursive: true, force: true });
-  } catch (error) {
-    await rm(staging, { recursive: true, force: true });
-    if (movedOriginal) {
-      await rm(packagePath, { recursive: true, force: true });
-      await rename(backup, packagePath);
-    }
-    throw error;
-  }
-}
-
 export class SkillCatalog {
   readonly database: StudioDatabase;
   readonly personalRoot: string;
@@ -270,6 +196,56 @@ export class SkillCatalog {
 
   listProjects(): TrustedProject[] {
     return this.database.listTrustedProjects();
+  }
+
+  async createSkill(input: CreateSkillInput, capability: string): Promise<SkillPackage> {
+    if (!capability) throw new StudioValidationError('Mutation capability is required.');
+    const name = input.name.trim();
+    const description = input.description.trim();
+    const files: SkillFile[] = [
+      {
+        path: 'SKILL.md',
+        content: `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n# ${name}\n`,
+        mode: 0o644,
+      },
+    ];
+    const validation = this.validate(files, name);
+    if (!validation.valid) throw new StudioValidationError('New skill metadata is invalid.');
+
+    let root: string;
+    if (input.scope === 'personal') {
+      root = this.personalRoot;
+    } else {
+      const project = input.projectId
+        ? this.database.getTrustedProject(input.projectId)
+        : undefined;
+      if (!project) throw new StudioValidationError('Choose a trusted project.');
+      root = join(project.path, '.claude', 'skills');
+    }
+    await mkdir(root, { recursive: true });
+    const packagePath = join(root, name);
+    try {
+      await mkdir(packagePath, { recursive: false });
+      await writeFile(join(packagePath, 'SKILL.md'), files[0]!.content, { mode: 0o644 });
+    } catch {
+      throw new StudioValidationError('A skill with this name already exists.');
+    }
+
+    const id = `skill_${hash(`${input.scope}\0${input.projectId ?? ''}\0${name}`).slice(0, 32)}`;
+    const skill = summarize(
+      {
+        id,
+        scope: input.scope,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        relativePath: name,
+      },
+      { files, readOnly: false },
+      false,
+    );
+    skill.sourcePath = packagePath;
+    this.database.saveSkill(skill, packagePath);
+    this.importBaseline(skill);
+    return skill;
   }
 
   removeProject(id: string, capability: string): boolean {
@@ -355,13 +331,14 @@ export class SkillCatalog {
       this.database.saveSkill(item.package, item.packagePath);
       this.importBaseline(item.package);
     }
-    return discovered.map(({ package: skill }) => ({
+    return discovered.map(({ package: skill, packagePath }) => ({
       id: skill.id,
       name: skill.name,
       description: skill.description,
       scope: skill.scope,
       ...(skill.projectId ? { projectId: skill.projectId } : {}),
       relativePath: skill.relativePath,
+      sourcePath: packagePath,
       revision: skill.revision,
       fileCount: skill.fileCount,
       readOnly: skill.readOnly,
@@ -390,6 +367,7 @@ export class SkillCatalog {
       (await realpath(record.packagePath)).includes(`${sep}.tenex${sep}skills${sep}`),
     );
     skill.shadowedBy = record.summary.shadowedBy;
+    skill.sourcePath = record.packagePath;
     if (skill.shadowedBy) {
       skill.findings.push({
         id: 'personal-skill-shadow',
@@ -426,15 +404,6 @@ export class SkillCatalog {
     return this.database.listVersions(skillId);
   }
 
-  async versionDiff(skillId: string, versionId: string): Promise<PackageDiff> {
-    const version = this.database.getVersion(versionId);
-    if (!version || version.skillId !== skillId) {
-      throw new StudioNotFoundError('Skill version not found.');
-    }
-    const current = await this.getSkill(skillId);
-    return diffFiles(current.files, version.files);
-  }
-
   createDraft(input: CreateDraftInput, capability: string): SkillVersion {
     if (!capability) throw new StudioValidationError('Mutation capability is required.');
     const skill = this.database.getSkillRecord(input.skillId);
@@ -455,37 +424,5 @@ export class SkillCatalog {
       source: 'draft',
       files: input.files,
     });
-  }
-
-  async promote(input: PromoteInput): Promise<PromotionResult> {
-    if (!input.capability) throw new StudioValidationError('Mutation capability is required.');
-    const record = this.database.getSkillRecord(input.skillId);
-    const version = this.database.getVersion(input.versionId);
-    if (!record || !version || version.skillId !== input.skillId) {
-      throw new StudioNotFoundError('Skill version not found.');
-    }
-    if (record.summary.readOnly)
-      throw new StudioValidationError('Read-only skills cannot be promoted.');
-    const current = await this.getSkill(input.skillId);
-    if (current.revision !== input.baseRevision) throw new RevisionConflictError(current.revision);
-    const validation = this.validate(version.files, basename(record.summary.relativePath));
-    if (!validation.valid)
-      throw new StudioValidationError('Skill version must pass validation before promotion.');
-    const diff = diffFiles(current.files, version.files);
-    await writePackageAtomically(record.packagePath, version.files);
-    const promotedSkill = await this.getSkill(input.skillId);
-    this.database.saveSkill(promotedSkill, record.packagePath);
-    const promoted = this.database.saveVersion({
-      id: this.newId(),
-      skillId: input.skillId,
-      parentVersionId: version.id,
-      revision: promotedSkill.revision,
-      label: `Promoted: ${version.label}`,
-      ...(version.note ? { note: version.note } : {}),
-      createdAt: this.now(),
-      source: 'promoted',
-      files: promotedSkill.files,
-    });
-    return { skill: promotedSkill, version: promoted, diff };
   }
 }

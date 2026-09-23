@@ -204,6 +204,46 @@ describe('SkillTestRunner', () => {
     ).toThrow('Timeout must be between 1 and 300 seconds');
   });
 
+  it('runs in a trusted workspace with selected model effort and read-only access', async () => {
+    const setup = harness();
+    const run = setup.runner.launch({
+      skill: version(),
+      prompt: 'Inspect this repository',
+      model: 'claude-sonnet-5',
+      workspace: { id: 'project-1', label: 'Example', path: '/trusted/example' },
+      settings: {
+        maxTurns: 4,
+        timeoutSeconds: 60,
+        effort: 'xhigh',
+        toolPreset: 'read-only',
+      },
+    });
+    await waitFor(() => setup.children.length === 1);
+
+    expect(setup.invocations[0].options.cwd).toBe('/trusted/example');
+    expect(setup.invocations[0].args).toEqual(
+      expect.arrayContaining([
+        '--model',
+        'claude-sonnet-5',
+        '--effort',
+        'xhigh',
+        '--tools',
+        'Read,Glob,Grep',
+        '--add-dir',
+        '/fake/project-1',
+      ]),
+    );
+    expect(setup.runner.get(run.id)?.run).toMatchObject({
+      projectId: 'project-1',
+      workspaceLabel: 'Example',
+      effort: 'xhigh',
+      toolPreset: 'read-only',
+    });
+    emitResult(setup.children[0]);
+    setup.children[0].close(0);
+    await waitFor(() => setup.runner.get(run.id)?.run.status === 'passed');
+  });
+
   it('rejects package path traversal before creating a temporary project', () => {
     const setup = harness();
     const source = version();
@@ -336,6 +376,23 @@ describe('SkillTestRunner', () => {
         message: 'Claude emitted an unrecognized stream event.',
       }),
     );
+  });
+
+  it('emits initialization once even when Claude repeats system events', async () => {
+    const setup = harness();
+    const run = setup.runner.launch({ skill: version(), prompt: 'Prompt', model: 'sonnet' });
+    await waitFor(() => setup.children.length === 1);
+    setup.children[0].stdout.write('{"type":"system","subtype":"init"}\n');
+    setup.children[0].stdout.write('{"type":"system","subtype":"status"}\n');
+    emitResult(setup.children[0]);
+    setup.children[0].close(0);
+    await waitFor(() => setup.runner.get(run.id)?.run.status === 'passed');
+
+    expect(
+      setup.runner
+        .get(run.id)
+        ?.traces.filter((trace) => trace.kind === 'process' && trace.state === 'initialized'),
+    ).toHaveLength(1);
   });
 
   it('fails nonzero exits and zero exits without a result event', async () => {

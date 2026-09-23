@@ -11,6 +11,7 @@ export type SkillSummary = {
   scope: SkillScope;
   projectId?: string;
   relativePath: string;
+  sourcePath?: string;
   revision: string;
   fileCount: number;
   readOnly: boolean;

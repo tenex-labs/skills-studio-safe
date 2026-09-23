@@ -5,9 +5,9 @@ Local Claude Code skill management and test application.
 ## Product and storage contract
 
 - Library discovers personal `~/.claude/skills` and explicitly trusted project `.claude/skills`.
-- Editor keeps drafts separate from installed files and promotes only by explicit action.
-- Test Lab runs bounded, no-tools `claude -p` tests using existing CLI authentication.
-- Compare uses saved final results tied to immutable skill versions and test cases.
+- Editor saves immutable local versions without overwriting installed skill files.
+- Test Lab runs two bounded, no-tools `claude -p` configurations against shared input and compares
+  their saved results.
 - The filesystem is the authority for installed state.
 - SQLite stores trusted roots, immutable versions, test cases, and saved final results.
 - Active partial traces are ephemeral SSE data and are not persisted as results.
@@ -29,7 +29,7 @@ npm run preflight
 - `app/backend/api/` — loopback HTTP, SSE, origin, and mutation security
 - `app/frontend/shell/` — browser shell and global styling
 - `app/frontend/state/` — API client and application orchestration
-- `app/frontend/features/` — Library, Editor, Test Lab, and Compare
+- `app/frontend/features/` — Library, Editor, and the two-lane Test Lab
 - `app/frontend/model/` — pure presentation projections
 - `app/frontend/ui/` — reusable accessible components
 - `app/entrypoints/` — browser and server startup

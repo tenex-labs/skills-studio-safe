@@ -4,14 +4,14 @@
 
 ## Outcome
 
-Add one assertion that helps Compare explain whether a saved result met an expectation.
+Add one assertion that helps the Test Lab explain whether each result met an expectation.
 
 ## Build
 
 1. Choose a bounded assertion such as exact phrase, prohibited phrase, or maximum length.
 2. Evaluate it against a completed final result with a pure function.
 3. Store the assertion definition and outcome with the test/result provenance.
-4. Present pass, fail, and unavailable states in Test Lab and Compare.
+4. Present pass, fail, and unavailable states in both Test Lab lanes.
 
 ## Constraints
 

@@ -1,6 +1,6 @@
 # Workshop demo
 
-This flow presents Claude Skill Studio from discovery through promotion.
+This flow presents Claude Skill Studio from discovery through version comparison.
 
 ## Start
 
@@ -17,9 +17,10 @@ npm run dev
 4. **Test Lab:** choose a preset and immutable version, run a bounded no-tools test, and distinguish
    partial SSE trace from the final result.
 5. **Save:** save a completed result and explain its version/test provenance.
-6. **Compare:** compare two saved results and inspect assertion differences.
-7. **Promote:** preview scope and promote the approved draft; rescan to show the filesystem as
-   installed authority.
+6. **Experiment:** run two configurations on one prompt and inspect aligned output, assertions, and
+   usage.
+7. **Save:** confirm the preferred working copy and retain it in Studio version history without
+   changing the installed skill.
 8. **Extension:** assign one exercise from [`../../challenges/`](../../challenges/).
 
 ## Proof points
@@ -32,8 +33,8 @@ npm run dev
 ## Demo fallback
 
 Prepare fictional fixture skills and saved results. If Claude authentication, network, or usage
-limits block a live run, use the fake runner and clearly label it. If promotion fails, keep the
-draft and show the atomic-write error; do not edit the file manually during the demo.
+limits block a live run, use the fake runner and clearly label it. If saving fails, keep the working
+copy in the editor and show the local storage error.
 
 ## Cleanup
 

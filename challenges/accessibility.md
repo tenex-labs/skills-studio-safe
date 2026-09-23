@@ -8,7 +8,7 @@ Improve one complete workflow for keyboard, focus, semantics, and status announc
 
 ## Build
 
-1. Choose Library, Editor, Test Lab, or Compare.
+1. Choose Library, Editor, or one Test Lab lane.
 2. Navigate it using only the keyboard and inspect its accessible names and landmarks.
 3. Fix the highest-impact problems: semantic controls, visible focus, logical order, labels, and
    announced asynchronous or status changes.

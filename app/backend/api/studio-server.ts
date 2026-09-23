@@ -3,7 +3,13 @@ import { access } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { SkillCatalog } from '../catalog/catalog.ts';
-import { getClaudeReadiness } from '../platform/claude-readiness.ts';
+import {
+  getClaudeReadiness,
+  getClaudeLoginState,
+  startClaudeLogin,
+  stopClaudeLogin,
+} from '../platform/claude-readiness.ts';
+import { pickProjectDirectory } from '../platform/folder-picker.ts';
 import { SkillTestRunner } from '../testing/skill-runner.ts';
 import { StudioDatabase } from '../versions/database.ts';
 import { createStudioApi, type StudioApiRequest } from './studio-api.ts';
@@ -17,6 +23,8 @@ type StudioServerOptions = {
   catalog?: SkillCatalog;
   runner?: SkillTestRunner;
   capability?: string;
+  pickProject?: typeof pickProjectDirectory;
+  startLogin?: typeof startClaudeLogin;
 };
 
 function isAllowedOrigin(origin: string | undefined): boolean {
@@ -100,6 +108,8 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
       },
     });
   const capability = options.capability ?? randomBytes(24).toString('base64url');
+  const pickProject = options.pickProject ?? pickProjectDirectory;
+  const startLogin = options.startLogin ?? startClaudeLogin;
   const api = createStudioApi({
     catalog,
     database,
@@ -114,18 +124,30 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
       }
       return {
         claude,
+        authLogin: getClaudeLoginState(),
         database: 'ready',
         personalSkillsRoot,
         activeTests: database.listTestRuns().filter(({ status }) => status === 'running').length,
       };
     },
-    launchTest: async ({ skillId, versionId, testCaseId, prompt, model, settings }) => {
+    launchTest: async ({ skillId, versionId, testCaseId, prompt, model, projectId, settings }) => {
       const version = database.getVersion(versionId);
       if (!version || version.skillId !== skillId) throw new Error('Version not found.');
       const testCase = testCaseId
         ? database.listTestCases(skillId).find(({ id }) => id === testCaseId)
         : undefined;
-      return runner.launch({ skill: version, prompt, model, testCase, settings });
+      const project = projectId ? database.getTrustedProject(projectId) : undefined;
+      if (projectId && !project) throw new Error('Workspace not found.');
+      return runner.launch({
+        skill: version,
+        prompt,
+        model,
+        testCase,
+        settings,
+        workspace: project
+          ? { id: project.id, label: project.label, path: project.path }
+          : undefined,
+      });
     },
     cancelTest: async (runId) => {
       if (!runner.cancel(runId)) return undefined;
@@ -182,6 +204,14 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
         sendJson(response, 403, { error: 'Mutation capability rejected' });
         return;
       }
+      if (method === 'POST' && url.pathname === '/api/studio/projects/pick') {
+        sendJson(response, 200, { project: await pickProject() });
+        return;
+      }
+      if (method === 'POST' && url.pathname === '/api/studio/auth/login') {
+        sendJson(response, 202, startLogin());
+        return;
+      }
 
       const apiRequest: StudioApiRequest = {
         method: method as StudioApiRequest['method'],
@@ -201,6 +231,7 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
     catalog,
     runner,
     async close(): Promise<void> {
+      stopClaudeLogin();
       await runner.shutdown();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       database.close();

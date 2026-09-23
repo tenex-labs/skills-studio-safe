@@ -25,7 +25,12 @@ afterEach(async () => {
   for (const database of databases.splice(0)) database.close();
 });
 
-async function start(): Promise<string> {
+async function start(
+  options: {
+    pickProject?: () => Promise<{ label: string; path: string }>;
+    startLogin?: () => { started: boolean };
+  } = {},
+): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'skill-studio-server-'));
   const personalRoot = join(root, 'skills');
   await mkdir(join(personalRoot, 'example'), { recursive: true });
@@ -39,6 +44,7 @@ async function start(): Promise<string> {
     database,
     catalog: new SkillCatalog({ database, personalRoot }),
     capability: 'known-capability',
+    ...options,
   });
   servers.push(studio.server);
   await new Promise<void>((resolve, reject) => {
@@ -71,5 +77,31 @@ describe('Skill Studio HTTP server', () => {
     const response = await fetch(`${baseUrl}/api/studio/session`);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ capability: 'known-capability' });
+  });
+
+  it('protects folder selection and Claude login behind the launch capability', async () => {
+    const baseUrl = await start({
+      pickProject: async () => ({ label: 'sample', path: '/Users/test/sample' }),
+      startLogin: () => ({ started: true }),
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Studio-Capability': 'known-capability',
+    };
+
+    await expect(
+      fetch(`${baseUrl}/api/studio/projects/pick`, {
+        method: 'POST',
+        headers,
+        body: '{}',
+      }).then((response) => response.json()),
+    ).resolves.toEqual({ project: { label: 'sample', path: '/Users/test/sample' } });
+    await expect(
+      fetch(`${baseUrl}/api/studio/auth/login`, {
+        method: 'POST',
+        headers,
+        body: '{}',
+      }).then((response) => response.json()),
+    ).resolves.toEqual({ started: true });
   });
 });
