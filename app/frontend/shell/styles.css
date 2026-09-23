@@ -590,7 +590,11 @@ label > textarea {
 }
 
 .skill-card {
+  /* A button sizes itself to unbroken text, so pin it to its grid cell to keep long paths inside. */
+  width: 100%;
+  min-width: 0;
   min-height: 174px;
+  overflow: hidden;
   padding: 15px;
   text-align: left;
 }
@@ -678,7 +682,8 @@ label > textarea {
 }
 
 .skill-card .card-facts dd {
-  max-width: 72%;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
