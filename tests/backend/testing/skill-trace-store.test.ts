@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { SkillTraceStore } from '../../../app/backend/testing/skill-trace-store.ts';
 
 describe('SkillTraceStore', () => {
-  it('bounds each run independently and truncates content-bearing text', () => {
+  it('bounds each run independently and truncates free-text fields', () => {
     const store = new SkillTraceStore({ maxEventsPerRun: 2, maxTextLength: 5 });
     store.add('run-1', {
       id: 'one',
@@ -21,7 +21,7 @@ describe('SkillTraceStore', () => {
       id: 'three',
       timestamp: '2026-09-22T12:00:02.000Z',
       kind: 'result',
-      status: 'completed',
+      status: 'passed',
     });
     store.add('run-2', {
       id: 'other',
@@ -31,33 +31,28 @@ describe('SkillTraceStore', () => {
     });
 
     expect(store.list('run-1')).toEqual([
-      expect.objectContaining({ id: 'two', state: 'runn…' }),
-      expect.objectContaining({ id: 'three', status: 'comp…' }),
+      expect.objectContaining({ id: 'two', state: 'running' }),
+      expect.objectContaining({ id: 'three', status: 'passed' }),
     ]);
     expect(store.list('run-2')).toEqual([
       expect.objectContaining({ id: 'other', message: 'warn…' }),
     ]);
   });
 
-  it('publishes bounded traces until unsubscribed and returns defensive arrays', () => {
+  it('returns defensive copies and forgets deleted runs', () => {
     const store = new SkillTraceStore();
-    const subscriber = vi.fn();
-    const unsubscribe = store.subscribe('run', subscriber);
     const trace = {
       id: 'one',
       timestamp: '2026-09-22T12:00:00.000Z',
       kind: 'process' as const,
-      state: 'running',
+      state: 'running' as const,
     };
 
     store.add('run', trace);
-    const listed = store.list('run');
-    listed.splice(0);
-    unsubscribe();
-    store.add('run', { ...trace, id: 'two' });
+    store.list('run').splice(0);
+    expect(store.list('run')).toEqual([trace]);
 
-    expect(subscriber).toHaveBeenCalledOnce();
-    expect(subscriber).toHaveBeenCalledWith(trace);
-    expect(store.list('run')).toHaveLength(2);
+    store.delete('run');
+    expect(store.list('run')).toEqual([]);
   });
 });

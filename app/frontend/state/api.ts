@@ -1,4 +1,6 @@
 import type {
+  LaunchTestInput,
+  NewSkillTestCase,
   SkillFile,
   SkillPackage,
   SkillScope,
@@ -11,156 +13,127 @@ import type {
   TrustedProject,
 } from '../../domain/index';
 
-const jsonHeaders = { Accept: 'application/json', 'Content-Type': 'application/json' };
+/** Everything the UI can ask of the Studio. The live client and the demo client both implement it. */
+export interface StudioApi {
+  readiness(): Promise<StudioReadiness>;
+  projects(): Promise<TrustedProject[]>;
+  registerProject(input: { label: string; path: string }): Promise<TrustedProject>;
+  pickProject(): Promise<{ label: string; path: string }>;
+  startClaudeLogin(): Promise<{ started: boolean }>;
+  catalog(): Promise<SkillSummary[]>;
+  createSkill(input: {
+    scope: SkillScope;
+    projectId?: string;
+    name: string;
+    description: string;
+  }): Promise<SkillPackage>;
+  skill(id: string): Promise<SkillPackage>;
+  versions(skillId: string): Promise<SkillVersion[]>;
+  createVersion(
+    skillId: string,
+    input: { label: string; note?: string; files: SkillFile[]; baseRevision: string },
+  ): Promise<SkillVersion>;
+  testCases(skillId: string): Promise<SkillTestCase[]>;
+  createTestCase(skillId: string, input: NewSkillTestCase): Promise<SkillTestCase>;
+  testRuns(skillId: string): Promise<SkillTestRun[]>;
+  launchTest(input: LaunchTestInput): Promise<SkillTestRun>;
+  testRun(id: string): Promise<SkillTestRun>;
+  cancelTest(id: string): Promise<SkillTestRun>;
+  /** Streams a run's traces until its result trace. Returns a function that stops the stream. */
+  testEvents(id: string, onTrace: (trace: SkillTestTrace) => void, onError: () => void): () => void;
+}
+
 const apiRoot = '/api/studio';
+const jsonHeaders = { Accept: 'application/json', 'Content-Type': 'application/json' };
 let capability: string | undefined;
+
+export class StudioApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 async function mutationCapability(): Promise<string> {
   if (capability) return capability;
   const response = await fetch(`${apiRoot}/session`, { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error('Studio session is unavailable.');
+  if (!response.ok) throw new StudioApiError(response.status, 'Studio session is unavailable.');
   const body = (await response.json()) as { capability?: unknown };
   if (typeof body.capability !== 'string') throw new Error('Studio session is invalid.');
   capability = body.capability;
   return capability;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: { method: 'POST'; body: unknown }): Promise<T> {
   const headers: Record<string, string> = { ...jsonHeaders };
-  if (init?.method && init.method !== 'GET') {
-    headers['X-Studio-Capability'] = await mutationCapability();
-  }
-  const response = await fetch(path, {
-    ...init,
-    headers: { ...headers, ...init?.headers },
+  if (init) headers['X-Studio-Capability'] = await mutationCapability();
+  const response = await fetch(`${apiRoot}${path}`, {
+    method: init?.method ?? 'GET',
+    headers,
+    ...(init ? { body: JSON.stringify(init.body) } : {}),
   });
   if (!response.ok) {
-    throw new Error(`Studio API request failed (${response.status})`);
+    // The server returns safe, user-facing messages for validation and not-found errors.
+    const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
+    const message = typeof body?.error === 'string' ? body.error : 'Studio request failed.';
+    throw new StudioApiError(response.status, message);
   }
   return (await response.json()) as T;
 }
 
-function listFrom<T>(value: T[] | Record<string, T[]>, key: string): T[] {
-  return Array.isArray(value) ? value : (value[key] ?? []);
-}
+const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: 'POST', body });
+const segment = encodeURIComponent;
 
-export const studioApi = {
-  readiness: () => request<StudioReadiness>(`${apiRoot}/readiness`),
-  projects: async () => {
-    const value = await request<TrustedProject[] | { projects: TrustedProject[] }>(
-      `${apiRoot}/projects`,
-    );
-    return listFrom(value, 'projects');
-  },
-  registerProject: async (input: { label: string; path: string }) => {
-    const value = await request<TrustedProject | { project: TrustedProject }>(
-      `${apiRoot}/projects`,
-      { method: 'POST', body: JSON.stringify({ ...input, trust: true }) },
-    );
-    return 'project' in value ? value.project : value;
-  },
+export const studioApi: StudioApi = {
+  readiness: () => request<StudioReadiness>('/readiness'),
+  projects: () =>
+    request<{ projects: TrustedProject[] }>('/projects').then(({ projects }) => projects),
+  registerProject: (input) =>
+    post<{ project: TrustedProject }>('/projects', { ...input, trust: true }).then(
+      ({ project }) => project,
+    ),
   pickProject: () =>
-    request<{ project: { label: string; path: string } }>(`${apiRoot}/projects/pick`, {
-      method: 'POST',
-      body: '{}',
-    }).then(({ project }) => project),
-  startClaudeLogin: () =>
-    request<{ started: boolean }>(`${apiRoot}/auth/login`, {
-      method: 'POST',
-      body: '{}',
-    }),
-  catalog: async () => {
-    const value = await request<SkillSummary[] | { skills: SkillSummary[] }>(`${apiRoot}/catalog`);
-    return listFrom(value, 'skills');
-  },
-  skills: async (scope: SkillScope, projectId?: string) => {
-    const skills = await studioApi.catalog();
-    return skills.filter(
-      (skill) => skill.scope === scope && (scope !== 'project' || skill.projectId === projectId),
-    );
-  },
-  createSkill: (input: {
-    scope: SkillScope;
-    projectId?: string;
-    name: string;
-    description: string;
-  }) =>
-    request<{ skill: SkillPackage }>(`${apiRoot}/skills`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }).then(({ skill }) => skill),
-  skill: async (id: string) => {
-    const value = await request<SkillPackage | { skill: SkillPackage }>(
-      `${apiRoot}/skills/${encodeURIComponent(id)}`,
-    );
-    return 'skill' in value ? value.skill : value;
-  },
-  versions: async (id: string) => {
-    const value = await request<SkillVersion[] | { versions: SkillVersion[] }>(
-      `${apiRoot}/skills/${encodeURIComponent(id)}/versions`,
-    );
-    return listFrom(value, 'versions');
-  },
-  createVersion: async (
-    id: string,
-    input: { label: string; note?: string; files: SkillFile[]; baseRevision: string },
-  ) => {
-    const value = await request<SkillVersion | { version: SkillVersion }>(
-      `${apiRoot}/skills/${encodeURIComponent(id)}/drafts`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
-    );
-    return 'version' in value ? value.version : value;
-  },
-  testCases: async (id: string) => {
-    const value = await request<SkillTestCase[] | { testCases: SkillTestCase[] }>(
-      `${apiRoot}/skills/${encodeURIComponent(id)}/test-cases`,
-    );
-    return listFrom(value, 'testCases');
-  },
-  createTestCase: (id: string, input: Omit<SkillTestCase, 'id' | 'skillId' | 'createdAt'>) =>
-    request<{ testCase: SkillTestCase }>(`${apiRoot}/skills/${encodeURIComponent(id)}/test-cases`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }).then(({ testCase }) => testCase),
-  testRuns: async (skillId?: string) => {
-    const value = await request<SkillTestRun[] | { testRuns: SkillTestRun[] }>(
-      `${apiRoot}/test-runs`,
-    );
-    const runs = listFrom(value, 'testRuns');
-    return skillId ? runs.filter((run) => run.skillId === skillId) : runs;
-  },
-  launchTest: (input: {
-    skillId: string;
-    versionId: string;
-    testCaseId?: string;
-    prompt: string;
-    model: string;
-    projectId?: string;
-    settings: {
-      maxTurns: number;
-      timeoutSeconds: number;
-      effort: string;
-      toolPreset: 'none' | 'read-only';
-    };
-  }) =>
-    request<{ testRun: SkillTestRun }>(`${apiRoot}/test-runs`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }).then(({ testRun }) => testRun),
-  test: (id: string) =>
-    request<{ testRun: SkillTestRun }>(`${apiRoot}/test-runs/${encodeURIComponent(id)}`).then(
+    post<{ project: { label: string; path: string } }>('/projects/pick').then(
+      ({ project }) => project,
+    ),
+  startClaudeLogin: () => post<{ started: boolean }>('/auth/login'),
+  catalog: () => request<{ skills: SkillSummary[] }>('/catalog').then(({ skills }) => skills),
+  createSkill: (input) =>
+    post<{ skill: SkillPackage }>('/skills', input).then(({ skill }) => skill),
+  skill: (id) =>
+    request<{ skill: SkillPackage }>(`/skills/${segment(id)}`).then(({ skill }) => skill),
+  versions: (skillId) =>
+    request<{ versions: SkillVersion[] }>(`/skills/${segment(skillId)}/versions`).then(
+      ({ versions }) => versions,
+    ),
+  createVersion: (skillId, input) =>
+    post<{ version: SkillVersion }>(`/skills/${segment(skillId)}/drafts`, input).then(
+      ({ version }) => version,
+    ),
+  testCases: (skillId) =>
+    request<{ testCases: SkillTestCase[] }>(`/skills/${segment(skillId)}/test-cases`).then(
+      ({ testCases }) => testCases,
+    ),
+  createTestCase: (skillId, input) =>
+    post<{ testCase: SkillTestCase }>(`/skills/${segment(skillId)}/test-cases`, input).then(
+      ({ testCase }) => testCase,
+    ),
+  testRuns: (skillId) =>
+    request<{ testRuns: SkillTestRun[] }>(`/test-runs?skillId=${segment(skillId)}`).then(
+      ({ testRuns }) => testRuns,
+    ),
+  launchTest: (input) =>
+    post<{ testRun: SkillTestRun }>('/test-runs', input).then(({ testRun }) => testRun),
+  testRun: (id) =>
+    request<{ testRun: SkillTestRun }>(`/test-runs/${segment(id)}`).then(({ testRun }) => testRun),
+  cancelTest: (id) =>
+    post<{ testRun: SkillTestRun }>(`/test-runs/${segment(id)}/cancel`).then(
       ({ testRun }) => testRun,
     ),
-  cancelTest: (id: string) =>
-    request<{ testRun: SkillTestRun }>(`${apiRoot}/test-runs/${encodeURIComponent(id)}/cancel`, {
-      method: 'POST',
-      body: '{}',
-    }).then(({ testRun }) => testRun),
-  testEvents: (id: string, onTrace: (trace: SkillTestTrace) => void, onError: () => void) => {
-    const source = new EventSource(`${apiRoot}/test-runs/${encodeURIComponent(id)}/events`);
+  testEvents(id, onTrace, onError) {
+    const source = new EventSource(`${apiRoot}/test-runs/${segment(id)}/events`);
     source.onmessage = ({ data }) => {
       try {
         onTrace(JSON.parse(data) as SkillTestTrace);
@@ -172,5 +145,3 @@ export const studioApi = {
     return () => source.close();
   },
 };
-
-export type StudioApi = typeof studioApi;

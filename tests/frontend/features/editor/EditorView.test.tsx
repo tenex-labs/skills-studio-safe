@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { SkillPackage } from '../../app/domain/index';
-import { EditorView } from '../../app/frontend/features/editor/EditorView';
+import type { SkillPackage } from '../../../../app/domain/index';
+import { EditorView } from '../../../../app/frontend/features/editor/EditorView';
 
 const readOnlySkill: SkillPackage = {
   id: 'managed-skill',

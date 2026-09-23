@@ -1,4 +1,11 @@
-import type { SkillFile, SkillSummary, SkillTestRun, StudioReadiness } from '../../domain/index';
+import {
+  isTerminalStatus,
+  parseFrontmatter,
+  type SkillFile,
+  type SkillSummary,
+  type SkillTestRun,
+  type StudioReadiness,
+} from '../../domain/index';
 
 export type LoadState = 'loading' | 'ready' | 'error';
 export type StudioView = 'library' | 'editor' | 'test-lab';
@@ -21,7 +28,7 @@ export function filterCatalog(skills: SkillSummary[], query: string): SkillSumma
 }
 
 export function conflictLabel(skill: SkillSummary): string {
-  return skill.shadowedBy ? `Shadowed by ${skill.shadowedBy}` : 'No conflicts';
+  return skill.shadowedBy ? 'Shadowed: a personal skill with this name wins' : 'No conflicts';
 }
 
 export function validationLabel(validation: SkillSummary['validation']): string {
@@ -54,24 +61,13 @@ export function filesAreDirty(original: SkillFile[], edited: SkillFile[]): boole
 export type SkillMetadata = {
   name?: string;
   description?: string;
-  fields: Array<{ key: string; value: string }>;
 };
 
 export function parseSkillMetadata(content: string): SkillMetadata {
-  const lines = content.split(/\r?\n/);
-  if (lines[0]?.trim() !== '---') return { fields: [] };
-  const end = lines.slice(1).findIndex((line) => line.trim() === '---');
-  if (end < 0) return { fields: [] };
-  const fields = lines
-    .slice(1, end + 1)
-    .map((line) => line.match(/^([A-Za-z][\w-]*):\s*(.+)\s*$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({ key: match[1], value: match[2].replace(/^["']|["']$/g, '') }));
-  return {
-    name: fields.find(({ key }) => key === 'name')?.value,
-    description: fields.find(({ key }) => key === 'description')?.value,
-    fields,
-  };
+  const parsed = parseFrontmatter(content);
+  if (parsed.status !== 'ok') return {};
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  return { name: text(parsed.metadata.name), description: text(parsed.metadata.description) };
 }
 
 export function changedFilePaths(base: SkillFile[], next: SkillFile[]): string[] {
@@ -103,4 +99,20 @@ export function formatTokens(run?: SkillTestRun): string {
 
 export function formatCost(run?: SkillTestRun): string {
   return run?.usage?.costUsd === undefined ? 'Unavailable' : `$${run.usage.costUsd.toFixed(4)}`;
+}
+
+export function formatAssertions(run?: SkillTestRun): string {
+  if (!run?.testCaseId) return 'No test case';
+  if (!isTerminalStatus(run.status)) return 'Pending';
+  if (run.assertions.length === 0) return 'None defined';
+  const passed = run.assertions.filter((assertion) => assertion.passed).length;
+  return `${passed}/${run.assertions.length} passed`;
+}
+
+/** Splits a comma- or newline-separated list typed by the user into trimmed, non-empty entries. */
+export function parseList(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }

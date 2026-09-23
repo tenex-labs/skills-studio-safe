@@ -4,8 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { RevisionConflictError, SkillCatalog } from '../../../app/backend/catalog/catalog.ts';
-import { StudioDatabase } from '../../../app/backend/versions/database.ts';
+import { SkillCatalog } from '../../../app/backend/catalog/catalog.ts';
+import { RevisionConflictError } from '../../../app/backend/errors.ts';
+import { StudioDatabase } from '../../../app/backend/storage/database.ts';
 import type { SkillFile } from '../../../app/domain/index.ts';
 
 const databases: StudioDatabase[] = [];
@@ -120,15 +121,12 @@ describe('SkillCatalog versions', () => {
       },
       { path: 'notes.md', content: 'new file\n', mode: 0o644 },
     ];
-    studio.createDraft(
-      {
-        skillId: summary!.id,
-        baseRevision: summary!.revision,
-        files,
-        label: 'Edit description',
-      },
-      'test-capability',
-    );
+    studio.createDraft({
+      skillId: summary!.id,
+      baseRevision: summary!.revision,
+      files,
+      label: 'Edit description',
+    });
 
     expect(studio.listVersions(summary!.id)).toHaveLength(2);
     expect(await readFile(join(personal, 'editable', 'SKILL.md'), 'utf8')).toContain(
@@ -136,15 +134,61 @@ describe('SkillCatalog versions', () => {
     );
     await expect(readFile(join(personal, 'editable', 'notes.md'), 'utf8')).rejects.toThrow();
     expect(() =>
-      studio.createDraft(
-        {
-          skillId: summary!.id,
-          baseRevision: 'missing-revision',
-          files,
-          label: 'Conflicting draft',
-        },
-        'test-capability',
-      ),
+      studio.createDraft({
+        skillId: summary!.id,
+        baseRevision: 'missing-revision',
+        files,
+        label: 'Conflicting draft',
+      }),
     ).toThrow(RevisionConflictError);
+  });
+});
+
+describe('SkillCatalog mutations', () => {
+  it('creates personal and trusted-project skills and rejects duplicate names', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skill-create-'));
+    const personal = join(root, 'personal');
+    const project = join(root, 'project');
+    await mkdir(project, { recursive: true });
+    const studio = catalog(personal);
+    const trusted = await studio.registerProject({ path: project, trust: true });
+
+    const created = await studio.createSkill({
+      scope: 'personal',
+      name: 'new-skill',
+      description: 'Does one thing',
+    });
+    await studio.createSkill({
+      scope: 'project',
+      projectId: trusted.id,
+      name: 'new-skill',
+      description: 'Project copy',
+    });
+
+    expect(created).toMatchObject({ name: 'new-skill', scope: 'personal', readOnly: false });
+    expect(studio.listVersions(created.id)).toHaveLength(1);
+    expect(
+      await readFile(join(project, '.claude', 'skills', 'new-skill', 'SKILL.md'), 'utf8'),
+    ).toContain('Project copy');
+    await expect(
+      studio.createSkill({ scope: 'personal', name: 'new-skill', description: 'Again' }),
+    ).rejects.toThrow('already exists');
+    await expect(
+      studio.createSkill({ scope: 'project', name: 'other', description: 'No project' }),
+    ).rejects.toThrow('Choose a trusted project');
+  });
+
+  it('forgets a removed project and its catalog rows', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skill-remove-'));
+    const project = join(root, 'project');
+    await skill(join(project, '.claude', 'skills'), 'project-only', 'Project');
+    const studio = catalog(join(root, 'personal'));
+    const trusted = await studio.registerProject({ path: project, trust: true });
+    await studio.discover();
+
+    expect(studio.removeProject(trusted.id)).toBe(true);
+    expect(studio.listProjects()).toEqual([]);
+    expect(await studio.discover()).toEqual([]);
+    expect(studio.removeProject(trusted.id)).toBe(false);
   });
 });

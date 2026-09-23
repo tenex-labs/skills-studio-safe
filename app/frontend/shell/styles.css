@@ -1142,6 +1142,29 @@ label > textarea {
   white-space: pre-wrap;
 }
 
+.assertion-list {
+  margin: 0 10px 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.assertion-list li {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.assertion-list strong {
+  color: var(--success);
+}
+
+.assertion-list li[data-passed='false'] strong {
+  color: var(--danger);
+}
+
 .trace-details {
   margin: 0 10px 8px;
   border-top: 1px solid var(--line);

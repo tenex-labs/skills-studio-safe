@@ -1,4 +1,4 @@
-import { startSkillStudioServer } from '../backend/api/studio-server.ts';
+import { startSkillStudioServer } from '../backend/api/server.ts';
 
 const studio = startSkillStudioServer();
 

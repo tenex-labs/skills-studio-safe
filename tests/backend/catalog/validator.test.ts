@@ -55,19 +55,6 @@ description: Example
     );
   });
 
-  it('warns for a reserved synced package without making it invalid', () => {
-    const result = validateSkillPackage({
-      directoryName: 'example',
-      files: [file('---\nname: example\ndescription: Example\n---\n')],
-      reserved: true,
-    });
-
-    expect(result.valid).toBe(true);
-    expect(result.findings).toContainEqual(
-      expect.objectContaining({ id: 'reserved-synced-directory', severity: 'warning' }),
-    );
-  });
-
   it('accepts optional names and current Claude skill fields', () => {
     const result = validateSkillPackage({
       directoryName: 'example',

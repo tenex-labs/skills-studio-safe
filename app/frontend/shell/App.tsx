@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import { EditorView } from '../features/editor/EditorView';
 import { LibraryView } from '../features/library/LibraryView';
 import { TestLabView } from '../features/test-lab/TestLabView';
-import { ReadinessBar } from '../ui/components';
 import type { StudioView } from '../model/skill-view-model';
 import { useStudio } from '../state/useStudio';
+import { ReadinessBar } from './ReadinessBar';
 
 const routes: Array<{
   view: StudioView;
@@ -112,6 +112,8 @@ export default function App() {
             demoMode={studio.demoMode}
             onLaunch={studio.launchTest}
             onCancel={studio.cancelTest}
+            testCases={studio.testCases}
+            onSaveTestCase={studio.saveTestCase}
             onReauthenticate={studio.reauthenticateClaude}
             onSkillChange={studio.openSkill}
           />

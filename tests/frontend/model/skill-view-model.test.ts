@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest';
+import type { SkillSummary } from '../../../app/domain/index';
+import { demoRuns, demoSkills } from '../../../app/frontend/fixtures/demo';
+import {
+  conflictLabel,
+  filesAreDirty,
+  filterCatalog,
+  formatAssertions,
+  packageDiffSummary,
+  parseList,
+  parseSkillMetadata,
+  updateFile,
+  validationLabel,
+} from '../../../app/frontend/model/skill-view-model';
+
+const catalog: SkillSummary[] = demoSkills;
+
+describe('skill catalog projections', () => {
+  it('filters catalog content without losing conflict information', () => {
+    expect(filterCatalog(catalog, 'PROJECT')).toEqual([demoSkills[1]]);
+    expect(filterCatalog(catalog, 'review')).toHaveLength(2);
+    expect(conflictLabel(demoSkills[0])).toBe('No conflicts');
+    expect(conflictLabel(demoSkills[1])).toBe('Shadowed: a personal skill with this name wins');
+  });
+
+  it('renders validation counts honestly', () => {
+    expect(validationLabel({ errors: 0, warnings: 0 })).toBe('Valid');
+    expect(validationLabel({ errors: 0, warnings: 2 })).toBe('2 warnings');
+    expect(validationLabel({ errors: 1, warnings: 4 })).toBe('1 error');
+  });
+});
+
+describe('editor working copies', () => {
+  it('tracks dirty files and summarizes an immutable draft diff', () => {
+    const original = demoSkills[0].files;
+    const edited = updateFile(original, 'SKILL.md', `${original[0].content}\nNew guidance.`);
+
+    expect(filesAreDirty(original, edited)).toBe(true);
+    expect(filesAreDirty(edited, edited)).toBe(false);
+    expect(packageDiffSummary(original, edited)).toBe('1 changed file: SKILL.md');
+  });
+
+  it('parses the SKILL.md metadata summary as YAML', () => {
+    expect(parseSkillMetadata(demoSkills[0].files[0].content)).toEqual({
+      name: 'code-review',
+      description: 'Review a change for consequential correctness problems.',
+    });
+    expect(parseSkillMetadata('---\ndescription: "Use when: reviewing"\n---\n')).toEqual({
+      name: undefined,
+      description: 'Use when: reviewing',
+    });
+    expect(parseSkillMetadata('No frontmatter')).toEqual({});
+  });
+});
+
+describe('test run projections', () => {
+  const run = demoRuns[0];
+
+  it('summarizes assertions without confusing pending, empty, and missing test cases', () => {
+    expect(formatAssertions(undefined)).toBe('No test case');
+    expect(formatAssertions({ ...run, testCaseId: undefined })).toBe('No test case');
+    expect(formatAssertions({ ...run, status: 'running', assertions: [] })).toBe('Pending');
+    expect(formatAssertions({ ...run, assertions: [] })).toBe('None defined');
+    expect(
+      formatAssertions({ ...run, assertions: [...run.assertions, { label: 'x', passed: false }] }),
+    ).toBe('2/3 passed');
+  });
+
+  it('parses comma- and newline-separated expectations', () => {
+    expect(parseList(' profile, null \n\n  dereference ')).toEqual([
+      'profile',
+      'null',
+      'dereference',
+    ]);
+  });
+});

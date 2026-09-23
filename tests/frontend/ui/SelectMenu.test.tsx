@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SelectMenu } from '../../app/frontend/ui/SelectMenu';
+import { SelectMenu } from '../../../app/frontend/ui/SelectMenu';
 
 describe('SelectMenu', () => {
   it('supports keyboard navigation and skips disabled options', async () => {

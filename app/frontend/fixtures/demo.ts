@@ -9,7 +9,6 @@ import type {
 const skillMarkdown = `---
 name: code-review
 description: Review a change for consequential correctness problems.
-version: 1.2.0
 ---
 
 # Code Review
@@ -33,18 +32,19 @@ export const demoProjects: TrustedProject[] = [
   },
 ];
 
+// The same command name exists in both scopes, so the personal skill wins and the project copy is
+// shadowed. This mirrors how the real catalog reports precedence.
 export const demoSkills: SkillPackage[] = [
   {
     id: 'demo-personal-review',
     name: 'code-review',
     description: 'Review code changes and return prioritized findings.',
     scope: 'personal',
-    relativePath: 'code-review/SKILL.md',
+    relativePath: 'code-review',
     revision: 'filesystem:1',
     fileCount: 2,
     readOnly: false,
-    shadowedBy: 'Workshop project',
-    validation: { errors: 0, warnings: 1 },
+    validation: { errors: 0, warnings: 0 },
     files: [
       { path: 'SKILL.md', content: skillMarkdown, mode: 420 },
       {
@@ -53,15 +53,7 @@ export const demoSkills: SkillPackage[] = [
         mode: 420,
       },
     ],
-    findings: [
-      {
-        id: 'demo-warning',
-        severity: 'warning',
-        message: 'Description is longer than the recommended catalog summary.',
-        file: 'SKILL.md',
-        line: 3,
-      },
-    ],
+    findings: [],
   },
   {
     id: 'demo-project-review',
@@ -69,13 +61,26 @@ export const demoSkills: SkillPackage[] = [
     description: 'Project-specific review guidance.',
     scope: 'project',
     projectId: 'demo-project',
-    relativePath: '.claude/skills/code-review/SKILL.md',
+    relativePath: 'code-review',
     revision: 'filesystem:2',
     fileCount: 1,
     readOnly: true,
-    validation: { errors: 0, warnings: 0 },
-    files: [{ path: 'SKILL.md', content: skillMarkdown.replace('1.2.0', '1.3.0'), mode: 420 }],
-    findings: [],
+    shadowedBy: 'demo-personal-review',
+    validation: { errors: 0, warnings: 1 },
+    files: [
+      {
+        path: 'SKILL.md',
+        content: skillMarkdown.replace('Lead with findings.', 'Lead with project risks.'),
+        mode: 420,
+      },
+    ],
+    findings: [
+      {
+        id: 'personal-skill-shadow',
+        severity: 'warning',
+        message: 'A personal skill with this command name takes precedence.',
+      },
+    ],
   },
 ];
 
@@ -83,6 +88,7 @@ export const demoVersions: SkillVersion[] = [
   {
     id: 'demo-version-current',
     skillId: 'demo-personal-review',
+    parentVersionId: 'demo-version-baseline',
     revision: 'draft:2',
     label: 'Current workshop draft',
     note: 'Tightened finding quality.',
@@ -94,7 +100,7 @@ export const demoVersions: SkillVersion[] = [
     id: 'demo-version-baseline',
     skillId: 'demo-personal-review',
     revision: 'filesystem:1',
-    label: 'Installed baseline',
+    label: 'Filesystem baseline',
     note: 'Imported from the personal skill root.',
     createdAt: '2026-09-22T12:00:00Z',
     source: 'filesystem',
@@ -126,12 +132,17 @@ export const demoRuns: SkillTestRun[] = [
     testCaseId: 'demo-case',
     prompt: demoTestCases[0].prompt,
     model: 'sonnet',
+    effort: 'high',
+    toolPreset: 'none',
     status: 'passed',
     startedAt: '2026-09-22T13:31:00Z',
     finishedAt: '2026-09-22T13:31:03Z',
     durationMs: 3100,
     output: 'The optional profile is dereferenced before its presence is checked.',
     usage: { inputTokens: 410, outputTokens: 82, costUsd: 0.0031 },
-    assertions: [{ label: 'Contains “profile”', passed: true }],
+    assertions: [
+      { label: 'Output contains "profile"', passed: true },
+      { label: 'Output excludes "Looks good"', passed: true },
+    ],
   },
 ];

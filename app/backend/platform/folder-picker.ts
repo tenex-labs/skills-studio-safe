@@ -1,13 +1,15 @@
 import { execFile } from 'node:child_process';
 import { basename } from 'node:path';
 
+import { StudioValidationError } from '../errors.ts';
+
 export type FolderPickerCommand = (command: string, args: string[]) => Promise<string>;
 
 const run: FolderPickerCommand = (command, args) => {
   return new Promise((resolve, reject) => {
     execFile(command, args, { encoding: 'utf8', timeout: 120_000 }, (error, stdout) => {
       const path = stdout.trim();
-      if (error || !path) reject(new Error('Folder selection was cancelled.'));
+      if (error || !path) reject(new StudioValidationError('Folder selection was cancelled.'));
       else resolve(path.replace(/\/$/, ''));
     });
   });

@@ -10,20 +10,13 @@ import type {
   SkillVersion,
   TrustedProject,
 } from '../../domain/index.ts';
-import { StudioDatabase } from '../versions/database.ts';
+import { RevisionConflictError, StudioNotFoundError, StudioValidationError } from '../errors.ts';
+import { StudioDatabase } from '../storage/database.ts';
 import { validateSkillPackage } from './validator.ts';
 
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_PACKAGE_BYTES = 2 * 1024 * 1024;
 const MAX_FILES = 128;
-
-export class StudioNotFoundError extends Error {}
-export class StudioValidationError extends Error {}
-export class RevisionConflictError extends Error {
-  constructor(readonly currentRevision: string) {
-    super('The skill changed since this draft was created.');
-  }
-}
 
 export type CatalogOptions = {
   database: StudioDatabase;
@@ -49,6 +42,15 @@ export type CreateDraftInput = {
 
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+// Skill IDs are derived from location rather than stored, so a rescan finds the same skill again.
+function skillIdFor(
+  scope: SkillSummary['scope'],
+  projectId: string | undefined,
+  directory: string,
+) {
+  return `skill_${hash(`${scope}\0${projectId ?? ''}\0${directory}`).slice(0, 32)}`;
 }
 
 export function revisionForFiles(files: readonly SkillFile[]): string {
@@ -135,12 +137,10 @@ function metadataText(value: unknown): string {
 function summarize(
   identity: Pick<SkillSummary, 'id' | 'scope' | 'projectId' | 'relativePath'>,
   packageData: { files: SkillFile[]; readOnly: boolean },
-  reserved: boolean,
 ): SkillPackage {
   const validation = validateSkillPackage({
     directoryName: basename(identity.relativePath),
     files: packageData.files,
-    reserved,
   });
   const summary: SkillSummary = {
     ...identity,
@@ -155,6 +155,17 @@ function summarize(
     },
   };
   return { ...summary, files: packageData.files, findings: validation.findings };
+}
+
+// Claude Code resolves a same-name command to the personal skill, so the project copy is shadowed.
+function markShadowed(skill: SkillPackage, personalSkillId: string): void {
+  skill.shadowedBy = personalSkillId;
+  skill.findings.push({
+    id: 'personal-skill-shadow',
+    severity: 'warning',
+    message: 'A personal skill with this command name takes precedence.',
+  });
+  skill.validation.warnings += 1;
 }
 
 export class SkillCatalog {
@@ -198,8 +209,7 @@ export class SkillCatalog {
     return this.database.listTrustedProjects();
   }
 
-  async createSkill(input: CreateSkillInput, capability: string): Promise<SkillPackage> {
-    if (!capability) throw new StudioValidationError('Mutation capability is required.');
+  async createSkill(input: CreateSkillInput): Promise<SkillPackage> {
     const name = input.name.trim();
     const description = input.description.trim();
     const files: SkillFile[] = [
@@ -231,7 +241,7 @@ export class SkillCatalog {
       throw new StudioValidationError('A skill with this name already exists.');
     }
 
-    const id = `skill_${hash(`${input.scope}\0${input.projectId ?? ''}\0${name}`).slice(0, 32)}`;
+    const id = skillIdFor(input.scope, input.projectId, name);
     const skill = summarize(
       {
         id,
@@ -240,7 +250,6 @@ export class SkillCatalog {
         relativePath: name,
       },
       { files, readOnly: false },
-      false,
     );
     skill.sourcePath = packagePath;
     this.database.saveSkill(skill, packagePath);
@@ -248,8 +257,7 @@ export class SkillCatalog {
     return skill;
   }
 
-  removeProject(id: string, capability: string): boolean {
-    if (!capability) throw new StudioValidationError('Mutation capability is required.');
+  removeProject(id: string): boolean {
     return this.database.removeTrustedProject(id);
   }
 
@@ -269,10 +277,9 @@ export class SkillCatalog {
     const packages: { package: SkillPackage; packagePath: string }[] = [];
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const packagePath = join(root, entry.name);
-      let canonicalPackage: string;
       try {
         const lexicalPackage = await lstat(packagePath);
-        canonicalPackage = await realpath(packagePath);
+        const canonicalPackage = await realpath(packagePath);
         if (
           ((!lexicalPackage.isSymbolicLink() || scope === 'project') &&
             !contained(canonicalRoot, canonicalPackage)) ||
@@ -286,12 +293,11 @@ export class SkillCatalog {
       }
       const packageData = await readPackage(packagePath);
       const relativePath = entry.name;
-      const id = `skill_${hash(`${scope}\0${projectId ?? ''}\0${relativePath}`).slice(0, 32)}`;
+      const id = skillIdFor(scope, projectId, relativePath);
       packages.push({
         package: summarize(
           { id, scope, ...(projectId ? { projectId } : {}), relativePath },
           packageData,
-          canonicalPackage.includes(`${sep}.tenex${sep}skills${sep}`),
         ),
         packagePath,
       });
@@ -318,15 +324,7 @@ export class SkillCatalog {
     for (const item of discovered) {
       if (item.package.scope === 'project') {
         const personal = personalByName.get(item.package.name);
-        if (personal) {
-          item.package.shadowedBy = personal;
-          item.package.findings.push({
-            id: 'personal-skill-shadow',
-            severity: 'warning',
-            message: 'A personal skill with this command name takes precedence.',
-          });
-          item.package.validation.warnings += 1;
-        }
+        if (personal) markShadowed(item.package, personal);
       }
       this.database.saveSkill(item.package, item.packagePath);
       this.importBaseline(item.package);
@@ -364,18 +362,9 @@ export class SkillCatalog {
         relativePath: record.summary.relativePath,
       },
       packageData,
-      (await realpath(record.packagePath)).includes(`${sep}.tenex${sep}skills${sep}`),
     );
-    skill.shadowedBy = record.summary.shadowedBy;
     skill.sourcePath = record.packagePath;
-    if (skill.shadowedBy) {
-      skill.findings.push({
-        id: 'personal-skill-shadow',
-        severity: 'warning',
-        message: 'A personal skill with this command name takes precedence.',
-      });
-      skill.validation.warnings += 1;
-    }
+    if (record.summary.shadowedBy) markShadowed(skill, record.summary.shadowedBy);
     return skill;
   }
 
@@ -404,8 +393,7 @@ export class SkillCatalog {
     return this.database.listVersions(skillId);
   }
 
-  createDraft(input: CreateDraftInput, capability: string): SkillVersion {
-    if (!capability) throw new StudioValidationError('Mutation capability is required.');
+  createDraft(input: CreateDraftInput): SkillVersion {
     const skill = this.database.getSkillRecord(input.skillId);
     if (!skill) throw new StudioNotFoundError('Skill not found.');
     this.validate(input.files, basename(skill.summary.relativePath));

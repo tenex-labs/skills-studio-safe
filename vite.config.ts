@@ -6,7 +6,6 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/events': 'http://127.0.0.1:4319',
       '/api': 'http://127.0.0.1:4319',
     },
   },

@@ -1,6 +1,4 @@
-import type { ReactNode } from 'react';
-import type { StudioReadiness } from '../../domain/index';
-import type { LoadState } from '../model/skill-view-model';
+import { useId, type ReactNode } from 'react';
 
 export function PageHeading({
   title,
@@ -36,46 +34,6 @@ export function StateText({
   );
 }
 
-export function ReadinessBar({
-  readiness,
-  state,
-}: {
-  readiness: StudioReadiness;
-  state: LoadState;
-}) {
-  const claudeReady = readiness.claude.available && readiness.claude.authenticated;
-  return (
-    <section className="readiness-bar" aria-label="Studio readiness" aria-live="polite">
-      <div className="readiness-title">
-        <strong>Local setup</strong>
-      </div>
-      <div className="readiness-items">
-        <span data-state={claudeReady ? 'ready' : 'warning'}>
-          Claude:{' '}
-          {readiness.authLogin?.state === 'completed'
-            ? 'sign-in refreshed'
-            : readiness.authLogin?.state === 'running'
-              ? 'sign-in in progress'
-              : claudeReady
-                ? 'account found'
-                : 'sign-in required'}
-        </span>
-        <span data-state={readiness.database === 'ready' ? 'ready' : 'warning'}>
-          Draft store: {readiness.database}
-        </span>
-        <span data-state={readiness.activeTests ? 'active' : 'neutral'}>
-          Active tests: {readiness.activeTests}
-        </span>
-      </div>
-      <p>
-        {state === 'error'
-          ? 'Readiness unavailable. Editing and demo browsing remain available.'
-          : 'Test content stays local. Partial live traces are ephemeral.'}
-      </p>
-    </section>
-  );
-}
-
 export function EmptyState({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="empty-state">
@@ -100,10 +58,11 @@ export function Modal({
   onClose: () => void;
   confirmDisabled?: boolean;
 }) {
+  const titleId = useId();
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <h2 id="modal-title">{title}</h2>
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <h2 id={titleId}>{title}</h2>
         <div>{children}</div>
         <div className="button-row">
           <button className="button secondary" onClick={onClose}>

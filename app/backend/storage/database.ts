@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 
 import type {
+  AssertionResult,
   SkillFile,
   SkillSummary,
   SkillTestCase,
@@ -13,6 +14,7 @@ import type {
   TrustedProject,
 } from '../../domain/index.ts';
 
+// Migrations are append-only. Never edit one that has shipped; add a new entry instead.
 const migrations = [
   `
     CREATE TABLE trusted_projects (
@@ -156,6 +158,73 @@ type TestRunRow = {
   usage_json: string | null;
   assertions_json: string;
 };
+
+// JSON columns are written only by this class, but a hand-edited or corrupted database must not
+// crash the app, so each reader falls back to an empty value.
+function parseJson(text: string | null): unknown {
+  if (text === null) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function readStringArray(text: string): string[] {
+  const value = parseJson(text);
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : [];
+}
+
+function readAssertions(text: string): AssertionResult[] {
+  const value = parseJson(text);
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is AssertionResult =>
+      Boolean(entry) &&
+      typeof entry === 'object' &&
+      typeof (entry as AssertionResult).label === 'string' &&
+      typeof (entry as AssertionResult).passed === 'boolean',
+  );
+}
+
+function readUsage(text: string | null): SkillTestRun['usage'] {
+  const value = parseJson(text);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const number = (key: string): number | undefined => {
+    const field = record[key];
+    return typeof field === 'number' ? field : undefined;
+  };
+  return {
+    inputTokens: number('inputTokens'),
+    outputTokens: number('outputTokens'),
+    costUsd: number('costUsd'),
+  };
+}
+
+function testRunFrom(row: TestRunRow): SkillTestRun {
+  const usage = readUsage(row.usage_json);
+  return {
+    id: row.id,
+    skillId: row.skill_id,
+    versionId: row.version_id,
+    ...(row.test_case_id ? { testCaseId: row.test_case_id } : {}),
+    prompt: row.prompt,
+    model: row.model,
+    ...(row.effort ? { effort: row.effort } : {}),
+    ...(row.project_id ? { projectId: row.project_id } : {}),
+    ...(row.workspace_label ? { workspaceLabel: row.workspace_label } : {}),
+    ...(row.tool_preset ? { toolPreset: row.tool_preset } : {}),
+    status: row.status,
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+    ...(row.duration_ms === null ? {} : { durationMs: row.duration_ms }),
+    ...(row.exit_code === null ? {} : { exitCode: row.exit_code }),
+    ...(row.output === null ? {} : { output: row.output }),
+    ...(usage ? { usage } : {}),
+    assertions: readAssertions(row.assertions_json),
+  };
+}
 
 export function defaultStudioDatabasePath(): string {
   if (process.platform === 'darwin') {
@@ -385,8 +454,8 @@ export class StudioDatabase {
       skillId: row.skill_id,
       name: row.name,
       prompt: row.prompt,
-      expectedContains: JSON.parse(row.expected_contains) as string[],
-      expectedExcludes: JSON.parse(row.expected_excludes) as string[],
+      expectedContains: readStringArray(row.expected_contains),
+      expectedExcludes: readStringArray(row.expected_excludes),
       createdAt: row.created_at,
     }));
   }
@@ -437,25 +506,22 @@ export class StudioDatabase {
             .all(skillId)
         : this.connection.prepare('SELECT * FROM test_runs ORDER BY started_at DESC, id DESC').all()
     ) as TestRunRow[];
-    return rows.map((row) => ({
-      id: row.id,
-      skillId: row.skill_id,
-      versionId: row.version_id,
-      ...(row.test_case_id ? { testCaseId: row.test_case_id } : {}),
-      prompt: row.prompt,
-      model: row.model,
-      ...(row.effort ? { effort: row.effort } : {}),
-      ...(row.project_id ? { projectId: row.project_id } : {}),
-      ...(row.workspace_label ? { workspaceLabel: row.workspace_label } : {}),
-      ...(row.tool_preset ? { toolPreset: row.tool_preset } : {}),
-      status: row.status,
-      ...(row.started_at ? { startedAt: row.started_at } : {}),
-      ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
-      ...(row.duration_ms === null ? {} : { durationMs: row.duration_ms }),
-      ...(row.exit_code === null ? {} : { exitCode: row.exit_code }),
-      ...(row.output === null ? {} : { output: row.output }),
-      ...(row.usage_json ? { usage: JSON.parse(row.usage_json) as SkillTestRun['usage'] } : {}),
-      assertions: JSON.parse(row.assertions_json) as SkillTestRun['assertions'],
-    }));
+    return rows.map(testRunFrom);
+  }
+
+  getTestRun(id: string): SkillTestRun | undefined {
+    const row = this.connection.prepare('SELECT * FROM test_runs WHERE id = ?').get(id) as
+      TestRunRow | undefined;
+    return row ? testRunFrom(row) : undefined;
+  }
+
+  /**
+   * Runs live only in server memory, so any row still queued or running at startup belongs to a
+   * process that no longer exists. Mark it interrupted rather than inventing a result.
+   */
+  markInterruptedRuns(): number {
+    return this.connection
+      .prepare("UPDATE test_runs SET status = 'interrupted' WHERE status IN ('queued', 'running')")
+      .run().changes;
   }
 }

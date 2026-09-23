@@ -17,6 +17,8 @@
     "vite.config.ts",
     "app/domain/**/*.ts",
     "app/backend/**/*.ts",
-    "app/entrypoints/server.ts"
+    "app/entrypoints/server.ts",
+    "tests/backend/**/*.ts",
+    "tests/domain/**/*.ts"
   ]
 }

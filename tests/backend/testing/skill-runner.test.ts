@@ -5,10 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SkillTestCase, SkillVersion } from '../../../app/domain/index.ts';
 import {
-  createClaudeEnvironment,
-  getClaudeReadiness,
-} from '../../../app/backend/platform/claude-readiness.ts';
-import {
   SkillTestRunner,
   type SkillRunnerChild,
   type SkillRunnerFileSystem,
@@ -201,7 +197,7 @@ describe('SkillTestRunner', () => {
         model: 'sonnet',
         settings: { maxTurns: 4, timeoutSeconds: 301 },
       }),
-    ).toThrow('Timeout must be between 1 and 300 seconds');
+    ).toThrow('Timeout must be between 10 and 300 seconds');
   });
 
   it('runs in a trusted workspace with selected model effort and read-only access', async () => {
@@ -461,7 +457,7 @@ describe('SkillTestRunner', () => {
     expect(setup.cleaned).toEqual(['/fake/project-1']);
   });
 
-  it('fails assertion mismatches after a successful Claude result', async () => {
+  it('reports assertion outcomes separately from a successful process status', async () => {
     const setup = harness();
     const run = setup.runner.launch({
       skill: version(),
@@ -472,12 +468,80 @@ describe('SkillTestRunner', () => {
     await waitFor(() => setup.children.length === 1);
     emitResult(setup.children[0]);
     setup.children[0].close(0);
-    await waitFor(() => setup.runner.get(run.id)?.run.status === 'failed');
+    await waitFor(() => setup.runner.get(run.id)?.run.status === 'passed');
 
     expect(setup.runner.get(run.id)?.run.assertions[0]).toEqual({
       label: 'Output contains "missing"',
       passed: false,
     });
+  });
+
+  it('emits exactly one result trace, after the final run state is recorded', async () => {
+    const persisted: string[] = [];
+    const setup = harness();
+    const runner = new SkillTestRunner({
+      spawn: (command, args, options) => {
+        const child = new FakeChild(300);
+        setup.children.push(child);
+        setup.invocations.push({ command, args, options });
+        return child;
+      },
+      fileSystem: setup.fileSystem,
+      persist: (saved) => {
+        persisted.push(saved.status);
+      },
+      now: () => NOW,
+    });
+    const run = runner.launch({ skill: version(), prompt: 'Prompt', model: 'sonnet' });
+    const seen: string[] = [];
+    runner.subscribe(run.id, ({ run: current, traces }) => {
+      const last = traces.at(-1);
+      if (last?.kind === 'result')
+        seen.push(`${last.status}:${current.status}:${persisted.length}`);
+    });
+    await waitFor(() => setup.children.length === 1);
+    emitResult(setup.children[0]);
+    setup.children[0].close(0);
+    await waitFor(() => seen.length > 0);
+
+    expect(seen).toEqual(['passed:passed:1']);
+    expect(runner.get(run.id)?.traces.filter(({ kind }) => kind === 'result')).toHaveLength(1);
+  });
+
+  it('emits a result trace for cancelled queued runs that never started', async () => {
+    const setup = harness({ concurrency: 1 });
+    setup.runner.launch({ skill: version(), prompt: 'One', model: 'sonnet' });
+    const queued = setup.runner.launch({ skill: version(), prompt: 'Two', model: 'sonnet' });
+    setup.runner.cancel(queued.id);
+    await waitFor(() => setup.runner.get(queued.id)?.run.status === 'cancelled');
+
+    expect(setup.runner.get(queued.id)?.traces.at(-1)).toMatchObject({
+      kind: 'result',
+      status: 'cancelled',
+    });
+  });
+
+  it('counts active runs and evicts finished runs after the retention window', async () => {
+    const setup = harness();
+    const runner = new SkillTestRunner({
+      spawn: (command, args, options) => {
+        const child = new FakeChild(400);
+        setup.children.push(child);
+        setup.invocations.push({ command, args, options });
+        return child;
+      },
+      fileSystem: setup.fileSystem,
+      finishedRetentionMs: 5,
+    });
+    const run = runner.launch({ skill: version(), prompt: 'Prompt', model: 'sonnet' });
+    expect(runner.activeRunCount).toBe(1);
+    await waitFor(() => setup.children.length === 1);
+    emitResult(setup.children[0]);
+    setup.children[0].close(0);
+    await waitFor(() => runner.get(run.id)?.run.status === 'passed');
+
+    expect(runner.activeRunCount).toBe(0);
+    await waitFor(() => runner.get(run.id) === undefined);
   });
 
   it('omits raw tool inputs, tool results, stderr, and secrets from traces', async () => {
@@ -506,59 +570,5 @@ describe('SkillTestRunner', () => {
     expect(serializedTraces).not.toContain('echo');
     expect(serializedTraces).toContain('"name":"Shell"');
     expect(serializedTraces).toContain('Claude emitted diagnostic output.');
-  });
-});
-
-describe('Claude readiness', () => {
-  it('returns only availability, authentication, and a safe version', async () => {
-    const command = vi
-      .fn()
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '2.1.170 (Claude Code)\n' })
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: JSON.stringify({
-          loggedIn: true,
-          credential: 'must-not-escape',
-          subscriptionType: 'max',
-        }),
-      });
-
-    await expect(
-      getClaudeReadiness(command, { PATH: '/bin', HOME: '/home', SECRET: 'hidden' }),
-    ).resolves.toEqual({
-      available: true,
-      authenticated: true,
-      version: '2.1.170',
-    });
-    expect(command).toHaveBeenNthCalledWith(
-      2,
-      'claude',
-      ['auth', 'status', '--json'],
-      expect.objectContaining({ env: { PATH: '/bin', HOME: '/home' } }),
-    );
-  });
-
-  it('reports an unavailable or unauthenticated CLI without leaking command output', async () => {
-    await expect(
-      getClaudeReadiness(async () => ({
-        exitCode: 1,
-        stdout: 'credential-shaped failure output',
-      })),
-    ).resolves.toEqual({ available: false, authenticated: false });
-  });
-
-  it('inherits only the allowlisted environment needed by Claude auth', () => {
-    expect(
-      createClaudeEnvironment({
-        PATH: '/bin',
-        HOME: '/home',
-        CLAUDE_CODE_OAUTH_TOKEN: 'token',
-        RANDOM_SECRET: 'hidden',
-      }),
-    ).toEqual({
-      PATH: '/bin',
-      HOME: '/home',
-      CLAUDE_CODE_OAUTH_TOKEN: 'token',
-    });
   });
 });

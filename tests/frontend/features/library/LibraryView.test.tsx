@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { LibraryView } from '../../app/frontend/features/library/LibraryView';
+import { LibraryView } from '../../../../app/frontend/features/library/LibraryView';
 
 describe('LibraryView', () => {
   it('uses the native folder picker before explicitly trusting a project', async () => {

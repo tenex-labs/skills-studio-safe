@@ -1,7 +1,5 @@
 import type { SkillTestTrace } from '../../domain/index.ts';
 
-export type SkillTraceSubscriber = (trace: SkillTestTrace) => void;
-
 export type SkillTraceStoreOptions = {
   maxEventsPerRun?: number;
   maxTextLength?: number;
@@ -20,24 +18,19 @@ function boundTrace(trace: SkillTestTrace, maxTextLength: number): SkillTestTrac
       return { ...trace, text: truncate(trace.text, maxTextLength) };
     case 'warning':
       return { ...trace, message: truncate(trace.message, maxTextLength) };
-    case 'process':
-      return { ...trace, state: truncate(trace.state, maxTextLength) };
     case 'tool':
-      return {
-        ...trace,
-        name: truncate(trace.name, maxTextLength),
-        status: truncate(trace.status, maxTextLength),
-      };
+      return { ...trace, name: truncate(trace.name, maxTextLength) };
+    case 'process':
     case 'result':
-      return { ...trace, status: truncate(trace.status, maxTextLength) };
+      return trace;
   }
 }
 
+/** Holds a bounded, in-memory window of traces per run. Nothing here is ever persisted. */
 export class SkillTraceStore {
   readonly #maxEventsPerRun: number;
   readonly #maxTextLength: number;
   readonly #traces = new Map<string, SkillTestTrace[]>();
-  readonly #subscribers = new Map<string, Set<SkillTraceSubscriber>>();
 
   constructor(options: SkillTraceStoreOptions = {}) {
     this.#maxEventsPerRun = options.maxEventsPerRun ?? DEFAULT_MAX_EVENTS;
@@ -59,36 +52,17 @@ export class SkillTraceStore {
       traces.splice(0, traces.length - this.#maxEventsPerRun);
     }
     this.#traces.set(runId, traces);
-
-    for (const subscriber of this.#subscribers.get(runId) ?? []) {
-      subscriber(bounded);
-    }
   }
 
   list(runId: string): SkillTestTrace[] {
     return [...(this.#traces.get(runId) ?? [])];
   }
 
-  subscribe(runId: string, subscriber: SkillTraceSubscriber): () => void {
-    const subscribers = this.#subscribers.get(runId) ?? new Set<SkillTraceSubscriber>();
-    subscribers.add(subscriber);
-    this.#subscribers.set(runId, subscribers);
-
-    return () => {
-      subscribers.delete(subscriber);
-      if (subscribers.size === 0) {
-        this.#subscribers.delete(runId);
-      }
-    };
-  }
-
   delete(runId: string): void {
     this.#traces.delete(runId);
-    this.#subscribers.delete(runId);
   }
 
   clear(): void {
     this.#traces.clear();
-    this.#subscribers.clear();
   }
 }

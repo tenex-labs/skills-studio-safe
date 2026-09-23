@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { TestLabView } from '../../app/frontend/features/test-lab/TestLabView';
-import { demoSkills, demoVersions } from '../../app/frontend/fixtures/demo';
+import { TestLabView } from '../../../../app/frontend/features/test-lab/TestLabView';
+import { demoSkills, demoVersions } from '../../../../app/frontend/fixtures/demo';
 
 describe('TestLabView', () => {
   it('selects a skill directly without requiring Library navigation', async () => {
@@ -15,6 +15,7 @@ describe('TestLabView', () => {
         projects={[]}
         catalogState="ready"
         versions={[]}
+        testCases={[]}
         runs={[]}
         tracesByRun={{}}
         readiness={{
@@ -26,6 +27,7 @@ describe('TestLabView', () => {
         demoMode={false}
         onLaunch={vi.fn()}
         onCancel={vi.fn()}
+        onSaveTestCase={vi.fn()}
         onReauthenticate={vi.fn()}
         onSkillChange={onSkillChange}
       />,
@@ -44,6 +46,7 @@ describe('TestLabView', () => {
         projects={[]}
         catalogState="ready"
         versions={demoVersions}
+        testCases={[]}
         runs={[
           {
             id: 'failed-run',
@@ -67,6 +70,7 @@ describe('TestLabView', () => {
         demoMode={false}
         onLaunch={vi.fn()}
         onCancel={vi.fn()}
+        onSaveTestCase={vi.fn()}
         onReauthenticate={vi.fn()}
         onSkillChange={vi.fn()}
       />,

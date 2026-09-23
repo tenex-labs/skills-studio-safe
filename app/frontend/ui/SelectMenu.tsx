@@ -127,7 +127,7 @@ export function SelectMenu({
               className="select-search"
               type="search"
               value={query}
-              placeholder="Filter skills"
+              placeholder="Type to filter"
               aria-label={`Search ${label}`}
               onChange={(event) => {
                 setQuery(event.target.value);

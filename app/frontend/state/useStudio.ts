@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  SkillFile,
-  SkillPackage,
-  SkillScope,
-  SkillSummary,
-  SkillTestCase,
-  SkillTestRun,
-  SkillTestTrace,
-  SkillVersion,
-  StudioReadiness,
-  TrustedProject,
+import {
+  isTerminalStatus,
+  type LaunchTestInput,
+  type NewSkillTestCase,
+  type SkillFile,
+  type SkillPackage,
+  type SkillScope,
+  type SkillSummary,
+  type SkillTestCase,
+  type SkillTestRun,
+  type SkillTestTrace,
+  type SkillVersion,
+  type StudioReadiness,
+  type TrustedProject,
 } from '../../domain/index';
-import { demoProjects, demoRuns, demoSkills, demoTestCases, demoVersions } from '../fixtures/demo';
 import { unavailableReadiness, type LoadState } from '../model/skill-view-model';
 import { studioApi } from './api';
+import { createDemoApi } from './demo-api';
+
+function inScope(skill: SkillSummary, scope: SkillScope, projectId?: string): boolean {
+  return skill.scope === scope && (scope !== 'project' || skill.projectId === projectId);
+}
+
+function upsertRun(runs: SkillTestRun[], run: SkillTestRun): SkillTestRun[] {
+  return runs.some(({ id }) => id === run.id)
+    ? runs.map((item) => (item.id === run.id ? run : item))
+    : [run, ...runs];
+}
 
 export function useStudio() {
+  const [demoApi] = useState(createDemoApi);
+  const [demoMode, setDemoMode] = useState(false);
+  const api = demoMode ? demoApi : studioApi;
+
   const [readiness, setReadiness] = useState<StudioReadiness>(unavailableReadiness);
   const [readinessState, setReadinessState] = useState<LoadState>('loading');
   const [projects, setProjects] = useState<TrustedProject[]>([]);
@@ -23,15 +40,14 @@ export function useStudio() {
   const [allSkills, setAllSkills] = useState<SkillSummary[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('loading');
   const [catalogError, setCatalogError] = useState('');
-  const [demoMode, setDemoMode] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<SkillPackage>();
   const [versions, setVersions] = useState<SkillVersion[]>([]);
   const [testCases, setTestCases] = useState<SkillTestCase[]>([]);
   const [runs, setRuns] = useState<SkillTestRun[]>([]);
   const [tracesByRun, setTracesByRun] = useState<Record<string, SkillTestTrace[]>>({});
   const closeStreams = useRef(new Map<string, () => void>());
-  const demoRunCounter = useRef(0);
 
+  // Readiness always describes the real local setup, even while the catalog shows demo data.
   const loadReadiness = useCallback(async () => {
     try {
       const next = await studioApi.readiness();
@@ -45,36 +61,32 @@ export function useStudio() {
     }
   }, []);
 
-  const loadCatalog = useCallback(async (scope: SkillScope, projectId?: string) => {
-    setCatalogState('loading');
-    setCatalogError('');
-    try {
-      const [nextProjects, catalog] = await Promise.all([
-        studioApi.projects(),
-        studioApi.catalog(),
-      ]);
-      const nextSkills = catalog.filter(
-        (skill) => skill.scope === scope && (scope !== 'project' || skill.projectId === projectId),
-      );
-      setProjects(nextProjects);
-      setAllSkills(catalog);
-      setSkills(nextSkills);
-      setDemoMode(false);
-      setCatalogState('ready');
-    } catch {
-      setProjects(demoProjects);
-      setAllSkills(demoSkills);
-      setSkills(
-        demoSkills.filter(
-          (skill) =>
-            skill.scope === scope && (scope !== 'project' || skill.projectId === projectId),
-        ),
-      );
-      setDemoMode(true);
-      setCatalogError('Studio API unavailable. Showing a labeled workshop demo catalog.');
-      setCatalogState('error');
-    }
-  }, []);
+  const loadCatalog = useCallback(
+    async (scope: SkillScope, projectId?: string) => {
+      setCatalogState('loading');
+      setCatalogError('');
+      try {
+        const [nextProjects, catalog] = await Promise.all([
+          studioApi.projects(),
+          studioApi.catalog(),
+        ]);
+        setProjects(nextProjects);
+        setAllSkills(catalog);
+        setSkills(catalog.filter((skill) => inScope(skill, scope, projectId)));
+        setDemoMode(false);
+        setCatalogState('ready');
+      } catch {
+        const [nextProjects, catalog] = await Promise.all([demoApi.projects(), demoApi.catalog()]);
+        setProjects(nextProjects);
+        setAllSkills(catalog);
+        setSkills(catalog.filter((skill) => inScope(skill, scope, projectId)));
+        setDemoMode(true);
+        setCatalogError('Studio API unavailable. Showing a labeled workshop demo catalog.');
+        setCatalogState('error');
+      }
+    },
+    [demoApi],
+  );
 
   useEffect(() => {
     const streams = closeStreams.current;
@@ -91,19 +103,11 @@ export function useStudio() {
 
   const openSkill = useCallback(
     async (id: string) => {
-      if (demoMode || id.startsWith('demo-')) {
-        const skill = demoSkills.find((item) => item.id === id);
-        setSelectedSkill(skill);
-        setVersions(demoVersions.filter((version) => version.skillId === id));
-        setTestCases(demoTestCases.filter((testCase) => testCase.skillId === id));
-        setRuns(demoRuns.filter((run) => run.skillId === id));
-        return skill;
-      }
       const [skill, nextVersions, nextCases, nextRuns] = await Promise.all([
-        studioApi.skill(id),
-        studioApi.versions(id),
-        studioApi.testCases(id),
-        studioApi.testRuns(id),
+        api.skill(id),
+        api.versions(id),
+        api.testCases(id),
+        api.testRuns(id),
       ]);
       setSelectedSkill(skill);
       setVersions(nextVersions);
@@ -111,21 +115,24 @@ export function useStudio() {
       setRuns(nextRuns);
       return skill;
     },
-    [demoMode],
+    [api],
   );
 
-  const registerProject = useCallback(async (input: { label: string; path: string }) => {
-    const project = await studioApi.registerProject(input);
-    setProjects((current) => [...current, project]);
-    return project;
-  }, []);
+  const registerProject = useCallback(
+    async (input: { label: string; path: string }) => {
+      const project = await api.registerProject(input);
+      setProjects((current) => [...current.filter(({ id }) => id !== project.id), project]);
+      return project;
+    },
+    [api],
+  );
 
-  const pickProject = useCallback(() => studioApi.pickProject(), []);
+  const pickProject = useCallback(() => api.pickProject(), [api]);
 
   const createSkill = useCallback(
     async (input: { scope: SkillScope; projectId?: string; name: string; description: string }) => {
-      const skill = await studioApi.createSkill(input);
-      const nextVersions = await studioApi.versions(skill.id);
+      const skill = await api.createSkill(input);
+      const nextVersions = await api.versions(skill.id);
       setSkills((current) => [skill, ...current]);
       setAllSkills((current) => [skill, ...current]);
       setSelectedSkill(skill);
@@ -134,42 +141,22 @@ export function useStudio() {
       setRuns([]);
       return skill;
     },
-    [],
+    [api],
   );
 
   const reauthenticateClaude = useCallback(async () => {
-    await studioApi.startClaudeLogin();
+    await api.startClaudeLogin();
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1_000));
       const next = await loadReadiness();
       if (next.authLogin?.state === 'completed' || next.authLogin?.state === 'failed') break;
     }
-  }, [loadReadiness]);
+  }, [api, loadReadiness]);
 
   const saveSkill = useCallback(
     async (input: { files: SkillFile[] }) => {
       if (!selectedSkill) throw new Error('Select a skill before saving.');
-      if (demoMode) {
-        const refreshed = {
-          ...selectedSkill,
-          revision: `demo-saved:${Date.now()}`,
-          files: input.files,
-        };
-        const version = {
-          id: `demo-saved-${versions.length + 1}`,
-          skillId: refreshed.id,
-          revision: refreshed.revision,
-          label: 'Saved Studio version',
-          note: 'Saved from Editor',
-          createdAt: new Date().toISOString(),
-          source: 'draft' as const,
-          files: input.files,
-        };
-        setSelectedSkill(refreshed);
-        setVersions((current) => [version, ...current]);
-        return { skill: refreshed };
-      }
-      const draft = await studioApi.createVersion(selectedSkill.id, {
+      const draft = await api.createVersion(selectedSkill.id, {
         label: `Saved ${new Date().toLocaleString()}`,
         note: 'Saved from Editor',
         files: input.files,
@@ -180,111 +167,70 @@ export function useStudio() {
       setVersions((current) => [draft, ...current]);
       return { skill: refreshed };
     },
-    [demoMode, selectedSkill, versions.length],
+    [api, selectedSkill],
+  );
+
+  const saveTestCase = useCallback(
+    async (input: NewSkillTestCase) => {
+      if (!selectedSkill) throw new Error('Select a skill before saving a test case.');
+      const testCase = await api.createTestCase(selectedSkill.id, input);
+      setTestCases((current) => [...current, testCase]);
+      return testCase;
+    },
+    [api, selectedSkill],
+  );
+
+  const stopStream = useCallback((runId: string) => {
+    closeStreams.current.get(runId)?.();
+    closeStreams.current.delete(runId);
+  }, []);
+
+  const refreshRun = useCallback(
+    async (runId: string) => {
+      const run = await api.testRun(runId);
+      setRuns((current) => upsertRun(current, run));
+      if (isTerminalStatus(run.status)) stopStream(runId);
+    },
+    [api, stopStream],
   );
 
   const launchTest = useCallback(
-    async (input: {
-      versionId: string;
-      testCaseId?: string;
-      prompt: string;
-      model: string;
-      projectId?: string;
-      settings: {
-        maxTurns: number;
-        timeoutSeconds: number;
-        effort: string;
-        toolPreset: 'none' | 'read-only';
-      };
-    }) => {
+    async (input: Omit<LaunchTestInput, 'skillId'>) => {
       if (!selectedSkill) throw new Error('Select a skill before launching a test.');
-      const run = demoMode
-        ? {
-            ...demoRuns[0],
-            id: `demo-run-${++demoRunCounter.current}`,
-            versionId: input.versionId,
-            testCaseId: input.testCaseId,
-            prompt: input.prompt,
-            model: input.model,
-            status: 'running' as const,
-            output: undefined,
-            assertions: [],
-          }
-        : await studioApi.launchTest({ skillId: selectedSkill.id, ...input });
-      setRuns((current) => [run, ...current.filter(({ id }) => id !== run.id)]);
+      const run = await api.launchTest({ skillId: selectedSkill.id, ...input });
+      setRuns((current) => upsertRun(current, run));
       setTracesByRun((current) => ({ ...current, [run.id]: [] }));
-      if (demoMode) {
-        window.setTimeout(() => {
-          const output = `Demo response from ${input.model} using the selected skill version.`;
-          setTracesByRun((current) => ({
-            ...current,
-            [run.id]: [
-              {
-                id: `${run.id}-assistant`,
-                timestamp: new Date().toISOString(),
-                kind: 'assistant',
-                text: output,
-              },
-              {
-                id: `${run.id}-result`,
-                timestamp: new Date().toISOString(),
-                kind: 'result',
-                status: 'passed',
-              },
-            ],
-          }));
-          setRuns((current) =>
-            current.map((item) =>
-              item.id === run.id
-                ? {
-                    ...item,
-                    status: 'passed',
-                    output,
-                    durationMs: 800,
-                    assertions: [],
-                  }
-                : item,
-            ),
-          );
-        }, 250);
-      }
-      if (!demoMode && typeof EventSource !== 'undefined') {
-        const close = studioApi.testEvents(
-          run.id,
-          (trace) => {
-            setTracesByRun((current) => ({
-              ...current,
-              [run.id]: [...(current[run.id] ?? []), trace],
-            }));
-            if (trace.kind === 'result') {
-              void studioApi.test(run.id).then((finalRun) => {
-                setRuns((current) =>
-                  current.map((item) => (item.id === finalRun.id ? finalRun : item)),
-                );
-                closeStreams.current.get(run.id)?.();
-                closeStreams.current.delete(run.id);
-              });
-            }
-          },
-          () => undefined,
-        );
-        closeStreams.current.set(run.id, close);
-      }
+
+      const close = api.testEvents(
+        run.id,
+        (trace) => {
+          // A reconnecting stream replays earlier traces, so keep each trace once.
+          setTracesByRun((current) => {
+            const existing = current[run.id] ?? [];
+            if (existing.some(({ id }) => id === trace.id)) return current;
+            return { ...current, [run.id]: [...existing, trace] };
+          });
+          if (trace.kind === 'result') {
+            stopStream(run.id);
+            void refreshRun(run.id);
+          }
+        },
+        // The stream can drop when the run finishes and is evicted. Reconcile from the server.
+        () => void refreshRun(run.id).catch(() => undefined),
+      );
+      closeStreams.current.set(run.id, close);
       return run;
     },
-    [demoMode, selectedSkill],
+    [api, refreshRun, selectedSkill, stopStream],
   );
 
   const cancelTest = useCallback(
     async (id: string) => {
-      closeStreams.current.get(id)?.();
-      closeStreams.current.delete(id);
-      const run = demoMode ? runs.find((item) => item.id === id) : await studioApi.cancelTest(id);
-      if (!run) return;
-      const cancelled = { ...run, status: 'cancelled' as const };
-      setRuns((current) => current.map((item) => (item.id === id ? cancelled : item)));
+      // The server reports cancellation through the run's result trace once the process exits.
+      const run = await api.cancelTest(id);
+      setRuns((current) => upsertRun(current, run));
     },
-    [demoMode, runs],
+    [api],
   );
 
   return {
@@ -308,6 +254,7 @@ export function useStudio() {
     pickProject,
     reauthenticateClaude,
     saveSkill,
+    saveTestCase,
     launchTest,
     cancelTest,
   };

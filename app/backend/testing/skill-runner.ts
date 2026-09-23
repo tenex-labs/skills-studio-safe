@@ -1,19 +1,33 @@
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import type {
-  SkillPackage,
-  SkillTestCase,
-  SkillTestRun,
-  SkillTestStatus,
-  SkillTestTrace,
-  SkillVersion,
+import {
+  evaluateAssertions,
+  isEffortLevel,
+  isToolPreset,
+  testRunLimits,
+  type EffortLevel,
+  type SkillPackage,
+  type SkillTestCase,
+  type SkillTestRun,
+  type SkillTestTrace,
+  type SkillTestTraceInput,
+  type SkillVersion,
+  type TerminalTestStatus,
+  type TestRunSettings,
+  type ToolPreset,
 } from '../../domain/index.ts';
+import { StudioValidationError } from '../errors.ts';
 import { createClaudeEnvironment } from '../platform/claude-readiness.ts';
+import { parseStreamLine, type ClaudeStreamEvent } from './stream-parser.ts';
+import {
+  prepareTestPackage,
+  tempDirectoryFileSystem,
+  type SkillRunnerFileSystem,
+} from './test-package.ts';
 import { SkillTraceStore } from './skill-trace-store.ts';
+
+export type { SkillRunnerFileSystem } from './test-package.ts';
 
 type SkillSource = SkillVersion | SkillPackage;
 
@@ -22,12 +36,7 @@ export type SkillTestLaunch = {
   prompt: string;
   model: string;
   testCase?: SkillTestCase;
-  settings?: {
-    maxTurns: number;
-    timeoutSeconds: number;
-    effort?: string;
-    toolPreset?: 'none' | 'read-only';
-  };
+  settings?: Partial<TestRunSettings>;
   workspace?: {
     id: string;
     label: string;
@@ -66,18 +75,6 @@ export type SkillRunnerSpawn = (
   },
 ) => SkillRunnerChild;
 
-export interface SkillRunnerFileSystem {
-  createTempProject(): Promise<string>;
-  writeSkillFile(
-    projectDirectory: string,
-    commandName: string,
-    relativePath: string,
-    content: string,
-    mode: number,
-  ): Promise<void>;
-  cleanup(projectDirectory: string): Promise<void>;
-}
-
 export type SkillRunnerOptions = {
   concurrency?: number;
   timeoutMs?: number;
@@ -85,6 +82,8 @@ export type SkillRunnerOptions = {
   maxTurns?: number;
   maxBudgetUsd?: number;
   maxOutputLength?: number;
+  /** How long a finished run stays in memory so late SSE clients can still read its outcome. */
+  finishedRetentionMs?: number;
   environment?: NodeJS.ProcessEnv;
   spawn?: SkillRunnerSpawn;
   fileSystem?: SkillRunnerFileSystem;
@@ -94,8 +93,6 @@ export type SkillRunnerOptions = {
   createId?: () => string;
   signalProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
 };
-
-type TerminalStatus = Extract<SkillTestStatus, 'passed' | 'failed' | 'cancelled' | 'timed-out'>;
 
 type RunRecord = {
   run: SkillTestRun;
@@ -119,57 +116,27 @@ type RunRecord = {
   maxTurns: number;
   timeoutMs: number;
   malformedLines: number;
-  forcedStatus?: TerminalStatus;
+  forcedStatus?: TerminalTestStatus;
   finished: boolean;
   completion: Promise<void>;
   resolveCompletion: () => void;
 };
 
 const DEFAULT_CONCURRENCY = 2;
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = testRunLimits.timeoutSeconds.default * 1_000;
 const DEFAULT_KILL_GRACE_MS = 1_000;
-const DEFAULT_MAX_TURNS = 4;
 const DEFAULT_MAX_BUDGET_USD = 0.25;
 const DEFAULT_MAX_OUTPUT_LENGTH = 32_000;
+const DEFAULT_FINISHED_RETENTION_MS = 60_000;
 const MAX_PROMPT_LENGTH = 32_000;
-const MAX_SKILL_FILE_LENGTH = 1_000_000;
-const MAX_SKILL_PACKAGE_LENGTH = 5_000_000;
 const MAX_STREAM_LINE_LENGTH = 1_000_000;
 const MAX_MALFORMED_WARNINGS = 20;
-
-const defaultFileSystem: SkillRunnerFileSystem = {
-  async createTempProject() {
-    const directory = await mkdtemp(join(tmpdir(), 'claude-skill-studio-'));
-    await chmod(directory, 0o700);
-    return directory;
-  },
-  async writeSkillFile(projectDirectory, commandName, relativePath, content, mode) {
-    const skillRoot = join(projectDirectory, '.claude', 'skills', commandName);
-    const destination = join(skillRoot, ...relativePath.split('/'));
-    const resolvedRoot = resolve(skillRoot);
-    const resolvedDestination = resolve(destination);
-    if (
-      resolvedDestination !== resolvedRoot &&
-      !relative(resolvedRoot, resolvedDestination).startsWith(`..${posix.sep}`)
-    ) {
-      await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-      await writeFile(destination, content, { mode: mode & 0o777 });
-      return;
-    }
-    throw new Error('Skill file resolved outside its temporary skill directory');
-  },
-  async cleanup(projectDirectory) {
-    await rm(projectDirectory, { recursive: true, force: true });
-  },
-};
+const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/;
 
 const defaultSpawn: SkillRunnerSpawn = (command, args, options) =>
   spawn(command, [...args], options) as SkillRunnerChild;
 
-function createCompletion(): {
-  promise: Promise<void>;
-  resolve: () => void;
-} {
+function createCompletion(): { promise: Promise<void>; resolve: () => void } {
   let resolvePromise: () => void = () => undefined;
   const promise = new Promise<void>((resolve) => {
     resolvePromise = resolve;
@@ -191,104 +158,46 @@ function sourceIdentity(skill: SkillSource): { skillId: string; versionId: strin
     : { skillId: skill.id, versionId: skill.id };
 }
 
-function validateRelativePath(path: string): void {
+function inRange(value: number, limits: { min: number; max: number }): boolean {
+  return Number.isInteger(value) && value >= limits.min && value <= limits.max;
+}
+
+/** Resolves per-run settings and rejects anything outside the shared limits. */
+function resolveSettings(
+  settings: Partial<TestRunSettings> | undefined,
+  defaults: { maxTurns: number; timeoutMs: number },
+): { maxTurns: number; timeoutMs: number; effort: EffortLevel; toolPreset: ToolPreset } {
+  const maxTurns = settings?.maxTurns ?? defaults.maxTurns;
+  if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > testRunLimits.maxTurns.max) {
+    throw new StudioValidationError(
+      `Turn limit must be between 1 and ${testRunLimits.maxTurns.max}`,
+    );
+  }
   if (
-    !path ||
-    path.includes('\\') ||
-    path.includes('\0') ||
-    isAbsolute(path) ||
-    posix.normalize(path) !== path ||
-    path === '..' ||
-    path.startsWith('../')
+    settings?.timeoutSeconds !== undefined &&
+    !inRange(settings.timeoutSeconds, testRunLimits.timeoutSeconds)
   ) {
-    throw new Error('Skill files must use normalized relative paths');
+    const { min, max } = testRunLimits.timeoutSeconds;
+    throw new StudioValidationError(`Timeout must be between ${min} and ${max} seconds`);
   }
+  const effort = settings?.effort ?? 'high';
+  if (!isEffortLevel(effort)) throw new StudioValidationError('Unsupported effort level');
+  const toolPreset = settings?.toolPreset ?? 'none';
+  if (!isToolPreset(toolPreset)) throw new StudioValidationError('Unsupported tool preset');
+  return {
+    maxTurns,
+    timeoutMs:
+      settings?.timeoutSeconds === undefined ? defaults.timeoutMs : settings.timeoutSeconds * 1_000,
+    effort,
+    toolPreset,
+  };
 }
 
-function rewriteSkillName(files: SkillSource['files'], commandName: string): SkillSource['files'] {
-  let rewroteManifest = false;
-  const rewritten = files.map((file) => {
-    validateRelativePath(file.path);
-    if (file.path !== 'SKILL.md') {
-      return { ...file };
-    }
-
-    const frontmatter = file.content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!frontmatter) {
-      throw new Error('SKILL.md must contain YAML frontmatter');
-    }
-    const replacement = /^name:\s*.*$/m.test(frontmatter[1])
-      ? frontmatter[0].replace(/^name:\s*.*$/m, `name: ${commandName}`)
-      : frontmatter[0].replace(/^---\r?\n/, `---\nname: ${commandName}\n`);
-    rewroteManifest = true;
-    return {
-      ...file,
-      content: `${replacement}${file.content.slice(frontmatter[0].length)}`,
-    };
-  });
-
-  if (!rewroteManifest) {
-    throw new Error('Skill package must contain a root SKILL.md');
-  }
-  return rewritten;
-}
-
-function validateLaunch(input: SkillTestLaunch): void {
-  if (!input.prompt.trim() || input.prompt.length > MAX_PROMPT_LENGTH) {
-    throw new Error('Prompt must be non-empty and at most 32,000 characters');
-  }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/.test(input.model)) {
-    throw new Error('Model must be a Claude model name or alias');
-  }
-  if (input.skill.files.length === 0 || input.skill.files.length > 100) {
-    throw new Error('Skill package must contain between 1 and 100 files');
-  }
-  let packageLength = 0;
-  const paths = new Set<string>();
-  for (const file of input.skill.files) {
-    if (file.content.length > MAX_SKILL_FILE_LENGTH) {
-      throw new Error('Skill files must be at most 1,000,000 characters');
-    }
-    if (!Number.isInteger(file.mode) || file.mode < 0) {
-      throw new Error('Skill file modes must be non-negative integers');
-    }
-    if (paths.has(file.path)) {
-      throw new Error('Skill package file paths must be unique');
-    }
-    paths.add(file.path);
-    packageLength += file.content.length;
-  }
-  if (packageLength > MAX_SKILL_PACKAGE_LENGTH) {
-    throw new Error('Skill package must be at most 5,000,000 characters');
-  }
-}
-
-function readRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-}
-
-function readString(record: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function readNumber(record: Record<string, unknown> | undefined, key: string): number | undefined {
-  const value = record?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function coarseToolName(name: string | undefined): string {
-  const normalized = name?.toLowerCase() ?? '';
-  if (normalized.includes('skill')) return 'Skill';
-  if (normalized.includes('bash') || normalized.includes('shell')) return 'Shell';
-  if (['read', 'write', 'edit', 'glob', 'grep', 'file'].some((part) => normalized.includes(part))) {
-    return 'Filesystem';
-  }
-  if (normalized.includes('web') || normalized.includes('http')) return 'Network';
-  if (normalized.includes('task') || normalized.includes('agent')) return 'Agent';
-  return 'Other';
-}
-
+/**
+ * Runs skill tests as bounded `claude -p` child processes and exposes their progress as ephemeral
+ * traces. Each run copies the skill into a temp project under a unique command name, so the user's
+ * installed skills are never touched and never collide with the copy under test.
+ */
 export class SkillTestRunner {
   readonly #concurrency: number;
   readonly #timeoutMs: number;
@@ -296,6 +205,7 @@ export class SkillTestRunner {
   readonly #maxTurns: number;
   readonly #maxBudgetUsd: number;
   readonly #maxOutputLength: number;
+  readonly #finishedRetentionMs: number;
   readonly #environment: NodeJS.ProcessEnv;
   readonly #spawn: SkillRunnerSpawn;
   readonly #fileSystem: SkillRunnerFileSystem;
@@ -305,6 +215,7 @@ export class SkillTestRunner {
   readonly #createId: () => string;
   readonly #signalProcessGroup: (pid: number, signal: NodeJS.Signals) => void;
   readonly #records = new Map<string, RunRecord>();
+  readonly #evictions = new Set<NodeJS.Timeout>();
   readonly #queue: string[] = [];
   readonly #subscribers = new Map<string, Set<SkillTestSubscriber>>();
   #activeCount = 0;
@@ -317,9 +228,10 @@ export class SkillTestRunner {
     }
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.#killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-    this.#maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+    this.#maxTurns = options.maxTurns ?? testRunLimits.maxTurns.default;
     this.#maxBudgetUsd = options.maxBudgetUsd ?? DEFAULT_MAX_BUDGET_USD;
     this.#maxOutputLength = options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
+    this.#finishedRetentionMs = options.finishedRetentionMs ?? DEFAULT_FINISHED_RETENTION_MS;
     if (!Number.isFinite(this.#timeoutMs) || this.#timeoutMs < 1) {
       throw new RangeError('Skill test timeout must be positive');
     }
@@ -335,9 +247,12 @@ export class SkillTestRunner {
     if (!Number.isInteger(this.#maxOutputLength) || this.#maxOutputLength < 1) {
       throw new RangeError('Skill test output capacity must be a positive integer');
     }
+    if (!Number.isFinite(this.#finishedRetentionMs) || this.#finishedRetentionMs < 0) {
+      throw new RangeError('Finished run retention must not be negative');
+    }
     this.#environment = createClaudeEnvironment(options.environment);
     this.#spawn = options.spawn ?? defaultSpawn;
-    this.#fileSystem = options.fileSystem ?? defaultFileSystem;
+    this.#fileSystem = options.fileSystem ?? tempDirectoryFileSystem;
     this.#traceStore = options.traceStore ?? new SkillTraceStore();
     this.#persist = options.persist;
     this.#now = options.now ?? (() => new Date());
@@ -349,33 +264,33 @@ export class SkillTestRunner {
       });
   }
 
+  /** Runs that are queued or running. Finished runs awaiting eviction are not counted. */
+  get activeRunCount(): number {
+    return [...this.#records.values()].filter(({ finished }) => !finished).length;
+  }
+
   launch(input: SkillTestLaunch): SkillTestRun {
     if (this.#shuttingDown) {
       throw new Error('Skill test runner is shutting down');
     }
-    validateLaunch(input);
+    if (!input.prompt.trim() || input.prompt.length > MAX_PROMPT_LENGTH) {
+      throw new StudioValidationError('Prompt must be non-empty and at most 32,000 characters');
+    }
+    if (!MODEL_PATTERN.test(input.model)) {
+      throw new StudioValidationError('Model must be a Claude model name or alias');
+    }
+    const identity = sourceIdentity(input.skill);
+    if (input.testCase && input.testCase.skillId !== identity.skillId) {
+      throw new StudioValidationError('Test case must belong to the selected skill');
+    }
+    const settings = resolveSettings(input.settings, {
+      maxTurns: this.#maxTurns,
+      timeoutMs: this.#timeoutMs,
+    });
 
     const id = this.#createId();
     const commandName = `skill-test-${id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 40)}`;
-    const files = rewriteSkillName(input.skill.files, commandName);
-    const identity = sourceIdentity(input.skill);
-    const maxTurns = input.settings?.maxTurns ?? this.#maxTurns;
-    const timeoutMs = input.settings ? input.settings.timeoutSeconds * 1_000 : this.#timeoutMs;
-    const effort = input.settings?.effort ?? 'high';
-    const toolPreset = input.settings?.toolPreset ?? 'none';
-    if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 20) {
-      throw new Error('Turn limit must be between 1 and 20');
-    }
-    const minimumTimeout = input.settings ? 1_000 : 1;
-    if (!Number.isFinite(timeoutMs) || timeoutMs < minimumTimeout || timeoutMs > 300_000) {
-      throw new Error('Timeout must be between 1 and 300 seconds');
-    }
-    if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'].includes(effort)) {
-      throw new Error('Unsupported effort level');
-    }
-    if (input.testCase && input.testCase.skillId !== identity.skillId) {
-      throw new Error('Test case must belong to the selected skill');
-    }
+    const files = prepareTestPackage(input.skill.files, commandName);
     const completion = createCompletion();
     const run: SkillTestRun = {
       id,
@@ -383,11 +298,11 @@ export class SkillTestRunner {
       testCaseId: input.testCase?.id,
       prompt: input.prompt,
       model: input.model,
-      effort,
+      effort: settings.effort,
       ...(input.workspace
         ? { projectId: input.workspace.id, workspaceLabel: input.workspace.label }
         : {}),
-      toolPreset,
+      toolPreset: settings.toolPreset,
       status: 'queued',
       assertions: [],
     };
@@ -405,16 +320,15 @@ export class SkillTestRunner {
       sawPartialText: false,
       sawMessageStart: false,
       assistantTurns: 0,
-      maxTurns,
-      timeoutMs,
+      maxTurns: settings.maxTurns,
+      timeoutMs: settings.timeoutMs,
       malformedLines: 0,
       finished: false,
       completion: completion.promise,
       resolveCompletion: completion.resolve,
     });
     this.#queue.push(id);
-    this.#addTrace(id, 'process', { state: 'queued' });
-    this.#notify(id);
+    this.#addTrace(id, { kind: 'process', state: 'queued' });
     this.#drainQueue();
     return cloneRun(run);
   }
@@ -462,6 +376,9 @@ export class SkillTestRunner {
       this.cancel(record.run.id);
     }
     await Promise.all(pending.map((record) => record.completion));
+    for (const eviction of this.#evictions) clearTimeout(eviction);
+    this.#evictions.clear();
+    this.#records.clear();
     this.#traceStore.clear();
     this.#subscribers.clear();
   }
@@ -477,11 +394,42 @@ export class SkillTestRunner {
     }
   }
 
+  #claudeArguments(record: RunRecord): string[] {
+    const args = [
+      '-p',
+      '--model',
+      record.run.model,
+      '--effort',
+      record.run.effort ?? 'high',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--include-partial-messages',
+      '--no-session-persistence',
+      '--setting-sources',
+      'project',
+      '--mcp-config',
+      '{"mcpServers":{}}',
+      '--strict-mcp-config',
+      '--permission-mode',
+      'dontAsk',
+      '--tools',
+      record.run.toolPreset === 'read-only' ? 'Read,Glob,Grep' : '',
+      '--max-budget-usd',
+      String(this.#maxBudgetUsd),
+    ];
+    // In a trusted workspace the process starts in the project, so the temp copy of the skill is
+    // added as an extra directory for Claude to discover.
+    if (record.workspacePath && record.projectDirectory) {
+      args.push('--add-dir', record.projectDirectory);
+    }
+    return args;
+  }
+
   async #start(record: RunRecord): Promise<void> {
     record.run.status = 'running';
     record.run.startedAt = this.#now().toISOString();
-    this.#addTrace(record.run.id, 'process', { state: 'preparing' });
-    this.#notify(record.run.id);
+    this.#addTrace(record.run.id, { kind: 'process', state: 'preparing' });
     record.timeout = setTimeout(() => {
       this.#terminate(record, 'timed-out', 'The skill test exceeded its wall-time limit.');
     }, record.timeoutMs);
@@ -500,40 +448,14 @@ export class SkillTestRunner {
         if (await this.#finishInterruptedPreparation(record)) return;
       }
 
-      const args = [
-        '-p',
-        '--model',
-        record.run.model,
-        '--effort',
-        record.run.effort ?? 'high',
-        '--output-format',
-        'stream-json',
-        '--verbose',
-        '--include-partial-messages',
-        '--no-session-persistence',
-        '--setting-sources',
-        'project',
-        '--mcp-config',
-        '{"mcpServers":{}}',
-        '--strict-mcp-config',
-        '--permission-mode',
-        'dontAsk',
-        '--tools',
-        record.run.toolPreset === 'read-only' ? 'Read,Glob,Grep' : '',
-        '--max-budget-usd',
-        String(this.#maxBudgetUsd),
-      ];
-      if (record.workspacePath) {
-        args.push('--add-dir', record.projectDirectory);
-      }
-      const child = this.#spawn('claude', args, {
+      const child = this.#spawn('claude', this.#claudeArguments(record), {
         cwd: record.workspacePath ?? record.projectDirectory,
         env: this.#environment,
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       record.child = child;
-      this.#addTrace(record.run.id, 'process', { state: 'running' });
+      this.#addTrace(record.run.id, { kind: 'process', state: 'running' });
       child.stdout.on('data', (chunk: Buffer | string) => {
         this.#consumeChunk(record, chunk.toString());
       });
@@ -541,14 +463,15 @@ export class SkillTestRunner {
       child.stderr.on('data', () => {
         if (!warnedAboutDiagnostics) {
           warnedAboutDiagnostics = true;
-          this.#addTrace(record.run.id, 'warning', {
+          this.#addTrace(record.run.id, {
+            kind: 'warning',
             message: 'Claude emitted diagnostic output.',
           });
         }
       });
       child.once('error', () => {
         record.resultFailed = true;
-        this.#addTrace(record.run.id, 'warning', { message: 'Claude failed to start.' });
+        this.#addTrace(record.run.id, { kind: 'warning', message: 'Claude failed to start.' });
       });
       child.once('close', (exitCode) => {
         void this.#handleClose(record, exitCode);
@@ -556,7 +479,8 @@ export class SkillTestRunner {
       child.stdin.end(`/${record.commandName} ${record.run.prompt}`);
     } catch {
       if (record.finished) return;
-      this.#addTrace(record.run.id, 'warning', {
+      this.#addTrace(record.run.id, {
+        kind: 'warning',
         message: 'The skill test could not be prepared.',
       });
       if (record.child) {
@@ -584,136 +508,72 @@ export class SkillTestRunner {
     const lines = record.lineBuffer.split(/\r?\n/);
     record.lineBuffer = lines.pop() ?? '';
     for (const line of lines) {
-      this.#consumeLine(record, line);
+      this.#apply(record, parseStreamLine(line));
     }
   }
 
-  #consumeLine(record: RunRecord, line: string): void {
-    if (!line.trim()) return;
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch {
-      this.#malformed(record);
-      return;
-    }
-    const event = readRecord(value);
-    const type = readString(event, 'type');
-    if (!event || !type) {
-      this.#malformed(record);
-      return;
-    }
-
-    if (type === 'stream_event') {
-      this.#consumeStreamEvent(record, readRecord(event.event));
-      return;
-    }
-    if (type === 'assistant') {
-      this.#consumeAssistant(record, readRecord(event.message));
-      return;
-    }
-    if (type === 'result') {
-      this.#consumeResult(record, event);
-      return;
-    }
-    if (type === 'system') {
-      if (!record.initialized) {
-        record.initialized = true;
-        this.#addTrace(record.run.id, 'process', { state: 'initialized' });
-      }
-    }
-  }
-
-  #consumeStreamEvent(record: RunRecord, event: Record<string, unknown> | undefined): void {
-    const eventType = readString(event, 'type');
-    if (eventType === 'message_start') {
-      record.sawMessageStart = true;
-      record.assistantTurns += 1;
-      if (record.assistantTurns > record.maxTurns) {
-        this.#terminate(record, 'failed', 'The skill test exceeded its turn limit.');
-      }
-      return;
-    }
-
-    if (eventType === 'content_block_delta') {
-      const delta = readRecord(event?.delta);
-      if (readString(delta, 'type') === 'text_delta') {
-        const text = readString(delta, 'text');
-        if (text) {
-          record.sawPartialText = true;
-          this.#appendOutput(record, text);
-          this.#addTrace(record.run.id, 'assistant', { text });
-        }
-      }
-      return;
-    }
-
-    if (eventType === 'content_block_start') {
-      const block = readRecord(event?.content_block);
-      if (readString(block, 'type') === 'tool_use') {
-        record.activeToolName = coarseToolName(readString(block, 'name'));
-        this.#addTrace(record.run.id, 'tool', {
-          name: record.activeToolName,
-          status: 'started',
-        });
-      }
-      return;
-    }
-
-    if (eventType === 'content_block_stop' && record.activeToolName) {
-      this.#addTrace(record.run.id, 'tool', {
-        name: record.activeToolName,
-        status: 'completed',
-      });
-      record.activeToolName = undefined;
-    }
-  }
-
-  #consumeAssistant(record: RunRecord, message: Record<string, unknown> | undefined): void {
-    if (!record.sawMessageStart) {
-      record.assistantTurns += 1;
-      if (record.assistantTurns > record.maxTurns) {
-        this.#terminate(record, 'failed', 'The skill test exceeded its turn limit.');
+  #apply(record: RunRecord, event: ClaudeStreamEvent): void {
+    const runId = record.run.id;
+    switch (event.type) {
+      case 'ignored':
         return;
-      }
-    }
-    const content = message?.content;
-    if (!Array.isArray(content)) return;
-
-    for (const item of content) {
-      const block = readRecord(item);
-      const blockType = readString(block, 'type');
-      if (blockType === 'text' && !record.sawPartialText) {
-        const text = readString(block, 'text');
-        if (text) {
-          this.#appendOutput(record, text);
-          this.#addTrace(record.run.id, 'assistant', { text });
+      case 'malformed':
+        this.#malformed(record);
+        return;
+      case 'initialized':
+        if (!record.initialized) {
+          record.initialized = true;
+          this.#addTrace(runId, { kind: 'process', state: 'initialized' });
         }
-      } else if (blockType === 'tool_use') {
-        this.#addTrace(record.run.id, 'tool', {
-          name: coarseToolName(readString(block, 'name')),
-          status: 'started',
-        });
-      }
+        return;
+      case 'turn-started':
+        record.sawMessageStart = true;
+        this.#countTurn(record);
+        return;
+      case 'text-delta':
+        record.sawPartialText = true;
+        this.#appendOutput(record, event.text);
+        this.#addTrace(runId, { kind: 'assistant', text: event.text });
+        return;
+      case 'tool-started':
+        record.activeToolName = event.tool;
+        this.#addTrace(runId, { kind: 'tool', name: event.tool, status: 'started' });
+        return;
+      case 'block-stopped':
+        if (record.activeToolName) {
+          this.#addTrace(runId, { kind: 'tool', name: record.activeToolName, status: 'completed' });
+          record.activeToolName = undefined;
+        }
+        return;
+      case 'assistant-message':
+        // Complete messages repeat what partial events already streamed. They only count turns and
+        // supply text when the CLI did not stream partial output.
+        if (!record.sawMessageStart && !this.#countTurn(record)) return;
+        if (!record.sawPartialText) {
+          for (const text of event.texts) {
+            this.#appendOutput(record, text);
+            this.#addTrace(runId, { kind: 'assistant', text });
+          }
+        }
+        for (const tool of event.tools) {
+          this.#addTrace(runId, { kind: 'tool', name: tool, status: 'started' });
+        }
+        return;
+      case 'result':
+        record.resultSeen = true;
+        record.resultFailed = event.failed;
+        if (event.result && !record.output) this.#appendOutput(record, event.result);
+        if (event.usage) record.run.usage = event.usage;
+        return;
     }
   }
 
-  #consumeResult(record: RunRecord, event: Record<string, unknown>): void {
-    record.resultSeen = true;
-    record.resultFailed = event.is_error === true || readString(event, 'subtype') === 'error';
-    const result = readString(event, 'result');
-    if (result && !record.output) this.#appendOutput(record, result);
-
-    const usage = readRecord(event.usage);
-    const inputTokens = readNumber(usage, 'input_tokens');
-    const outputTokens = readNumber(usage, 'output_tokens');
-    const costUsd = readNumber(event, 'total_cost_usd');
-    if (inputTokens !== undefined || outputTokens !== undefined || costUsd !== undefined) {
-      record.run.usage = { inputTokens, outputTokens, costUsd };
-    }
-    this.#addTrace(record.run.id, 'result', {
-      status: record.resultFailed ? 'failed' : 'completed',
-    });
+  /** Counts one assistant turn and returns false once the run has exceeded its turn limit. */
+  #countTurn(record: RunRecord): boolean {
+    record.assistantTurns += 1;
+    if (record.assistantTurns <= record.maxTurns) return true;
+    this.#terminate(record, 'failed', 'The skill test exceeded its turn limit.');
+    return false;
   }
 
   #appendOutput(record: RunRecord, text: string): void {
@@ -724,7 +584,8 @@ export class SkillTestRunner {
   #malformed(record: RunRecord): void {
     record.malformedLines += 1;
     if (record.malformedLines <= MAX_MALFORMED_WARNINGS) {
-      this.#addTrace(record.run.id, 'warning', {
+      this.#addTrace(record.run.id, {
+        kind: 'warning',
         message: 'Claude emitted an unrecognized stream event.',
       });
     }
@@ -733,7 +594,7 @@ export class SkillTestRunner {
   async #handleClose(record: RunRecord, exitCode: number | null): Promise<void> {
     if (record.finished) return;
     if (record.lineBuffer.trim()) {
-      this.#consumeLine(record, record.lineBuffer);
+      this.#apply(record, parseStreamLine(record.lineBuffer));
       record.lineBuffer = '';
     }
     record.run.exitCode = exitCode ?? undefined;
@@ -742,7 +603,8 @@ export class SkillTestRunner {
     if (!status) {
       status = exitCode === 0 && record.resultSeen && !record.resultFailed ? 'passed' : 'failed';
       if (exitCode === 0 && !record.resultSeen) {
-        this.#addTrace(record.run.id, 'warning', {
+        this.#addTrace(record.run.id, {
+          kind: 'warning',
           message: 'Claude exited without a valid result event.',
         });
       }
@@ -750,10 +612,10 @@ export class SkillTestRunner {
     await this.#finish(record, status);
   }
 
-  #terminate(record: RunRecord, status: TerminalStatus, warning: string): void {
+  #terminate(record: RunRecord, status: TerminalTestStatus, warning: string): void {
     if (record.finished || record.forcedStatus) return;
     record.forcedStatus = status;
-    this.#addTrace(record.run.id, 'warning', { message: warning });
+    this.#addTrace(record.run.id, { kind: 'warning', message: warning });
     const child = record.child;
     if (!child) {
       return;
@@ -783,30 +645,27 @@ export class SkillTestRunner {
     }
   }
 
-  async #finish(record: RunRecord, status: TerminalStatus): Promise<void> {
+  async #finish(record: RunRecord, status: TerminalTestStatus): Promise<void> {
     if (record.finished) return;
     record.finished = true;
     if (record.timeout) clearTimeout(record.timeout);
     if (record.killTimeout) clearTimeout(record.killTimeout);
 
     record.run.output = record.output || undefined;
-    record.run.assertions = this.#evaluateAssertions(record);
-    if (status === 'passed' && record.run.assertions.some((assertion) => !assertion.passed)) {
-      status = 'failed';
-    }
+    record.run.assertions = evaluateAssertions(record.testCase, record.output);
     record.run.status = status;
     record.run.finishedAt = this.#now().toISOString();
     if (record.run.startedAt) {
       record.run.durationMs =
         new Date(record.run.finishedAt).getTime() - new Date(record.run.startedAt).getTime();
     }
-    this.#addTrace(record.run.id, 'process', { state: status });
 
     if (record.projectDirectory) {
       try {
         await this.#fileSystem.cleanup(record.projectDirectory);
       } catch {
-        this.#addTrace(record.run.id, 'warning', {
+        this.#addTrace(record.run.id, {
+          kind: 'warning',
           message: 'Temporary skill files could not be removed.',
         });
       }
@@ -816,67 +675,38 @@ export class SkillTestRunner {
       try {
         await this.#persist(cloneRun(record.run));
       } catch {
-        this.#addTrace(record.run.id, 'warning', {
+        this.#addTrace(record.run.id, {
+          kind: 'warning',
           message: 'The completed skill test could not be persisted.',
         });
       }
     }
 
     if (record.run.startedAt) this.#activeCount -= 1;
-    this.#notify(record.run.id);
+    // The result trace is last so a client that sees it can read the final, persisted run.
+    this.#addTrace(record.run.id, { kind: 'result', status });
+    this.#scheduleEviction(record.run.id);
     record.resolveCompletion();
     this.#drainQueue();
   }
 
-  #evaluateAssertions(record: RunRecord): SkillTestRun['assertions'] {
-    if (!record.testCase) return [];
-    return [
-      ...record.testCase.expectedContains.map((expected) => ({
-        label: `Output contains "${expected}"`,
-        passed: record.output.includes(expected),
-      })),
-      ...record.testCase.expectedExcludes.map((excluded) => ({
-        label: `Output excludes "${excluded}"`,
-        passed: !record.output.includes(excluded),
-      })),
-    ];
+  #scheduleEviction(runId: string): void {
+    const eviction = setTimeout(() => {
+      this.#evictions.delete(eviction);
+      this.#records.delete(runId);
+      this.#traceStore.delete(runId);
+      this.#subscribers.delete(runId);
+    }, this.#finishedRetentionMs);
+    eviction.unref?.();
+    this.#evictions.add(eviction);
   }
 
-  #addTrace(
-    runId: string,
-    kind: SkillTestTrace['kind'],
-    value:
-      | { state: string }
-      | { text: string }
-      | { name: string; status: string }
-      | {
-          status: string;
-        }
-      | { message: string },
-  ): void {
-    const common = {
+  #addTrace(runId: string, input: SkillTestTraceInput): void {
+    this.#traceStore.add(runId, {
+      ...input,
       id: this.#createId(),
       timestamp: this.#now().toISOString(),
-    };
-    let trace: SkillTestTrace;
-    switch (kind) {
-      case 'process':
-        trace = { ...common, kind, state: (value as { state: string }).state };
-        break;
-      case 'assistant':
-        trace = { ...common, kind, text: (value as { text: string }).text };
-        break;
-      case 'tool':
-        trace = { ...common, kind, ...(value as { name: string; status: string }) };
-        break;
-      case 'result':
-        trace = { ...common, kind, status: (value as { status: string }).status };
-        break;
-      case 'warning':
-        trace = { ...common, kind, message: (value as { message: string }).message };
-        break;
-    }
-    this.#traceStore.add(runId, trace);
+    });
     this.#notify(runId);
   }
 

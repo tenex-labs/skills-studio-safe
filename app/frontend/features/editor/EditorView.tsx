@@ -1,6 +1,11 @@
 import { AlertTriangle, CheckCircle2, Code2, Eye, File, GitCommit, Save } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { SkillFile, SkillPackage, SkillVersion } from '../../../domain/index';
+import {
+  splitFrontmatter,
+  type SkillFile,
+  type SkillPackage,
+  type SkillVersion,
+} from '../../../domain/index';
 import { EmptyState, Modal, PageHeading, StateText } from '../../ui/components';
 import {
   filesAreDirty,
@@ -11,7 +16,7 @@ import {
 } from '../../model/skill-view-model';
 
 function MarkdownPreview({ content }: { content: string }) {
-  const body = content.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  const body = splitFrontmatter(content)?.body ?? content;
   return (
     <div className="markdown-preview" aria-label="Safe preview">
       {body.split(/\r?\n/).map((line, index) => {

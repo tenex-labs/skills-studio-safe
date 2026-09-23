@@ -1,6 +1,4 @@
-import { parseDocument } from 'yaml';
-
-import type { SkillFile, ValidationFinding } from '../../domain/index.ts';
+import { parseFrontmatter, type SkillFile, type ValidationFinding } from '../../domain/index.ts';
 
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1_024;
@@ -33,7 +31,6 @@ const SUPPORTED_FIELDS = new Set([
 export type SkillValidationInput = {
   directoryName: string;
   files: readonly SkillFile[];
-  reserved?: boolean;
 };
 
 export type SkillValidationResult = {
@@ -50,11 +47,6 @@ function finding(
   line?: number,
 ): ValidationFinding {
   return { id, severity, message, file, ...(line === undefined ? {} : { line }) };
-}
-
-function frontmatter(contents: string): { source?: string; bodyLine: number } {
-  const match = contents.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  return match ? { source: match[1], bodyLine: match[0].split(/\r?\n/).length } : { bodyLine: 1 };
 }
 
 function validateRelativeLinks(files: readonly SkillFile[]): ValidationFinding[] {
@@ -115,33 +107,27 @@ export function validateSkillPackage(input: SkillValidationInput): SkillValidati
   if (!skill) {
     findings.push(finding('skill-file-missing', 'error', 'SKILL.md is required.'));
   } else {
-    const parsed = frontmatter(skill.content);
-    if (!parsed.source) {
+    const parsed = parseFrontmatter(skill.content);
+    if (parsed.status === 'missing') {
       findings.push(
         finding('frontmatter-missing', 'error', 'YAML frontmatter is required.', 'SKILL.md', 1),
       );
+    } else if (parsed.status === 'invalid-yaml') {
+      findings.push(
+        finding('frontmatter-yaml', 'error', 'YAML frontmatter is invalid.', 'SKILL.md', 2),
+      );
+    } else if (parsed.status === 'not-an-object') {
+      findings.push(
+        finding(
+          'frontmatter-object',
+          'error',
+          'YAML frontmatter must be an object.',
+          'SKILL.md',
+          2,
+        ),
+      );
     } else {
-      const document = parseDocument(parsed.source);
-      if (document.errors.length > 0) {
-        findings.push(
-          finding('frontmatter-yaml', 'error', 'YAML frontmatter is invalid.', 'SKILL.md', 2),
-        );
-      } else {
-        const value: unknown = document.toJS();
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          metadata = value as Record<string, unknown>;
-        } else {
-          findings.push(
-            finding(
-              'frontmatter-object',
-              'error',
-              'YAML frontmatter must be an object.',
-              'SKILL.md',
-              2,
-            ),
-          );
-        }
-      }
+      metadata = parsed.metadata;
     }
 
     const lineCount = skill.content.split(/\r?\n/).length;
@@ -260,15 +246,6 @@ export function validateSkillPackage(input: SkillValidationInput): SkillValidati
     }
   }
 
-  if (input.reserved) {
-    findings.push(
-      finding(
-        'reserved-synced-directory',
-        'warning',
-        'This skill is in a reserved synced directory.',
-      ),
-    );
-  }
   findings.push(...validateRelativeLinks(input.files));
   return {
     ...(metadata ? { metadata } : {}),

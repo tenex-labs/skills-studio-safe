@@ -1,10 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 
-export type ClaudeReadiness = {
-  available: boolean;
-  authenticated: boolean;
-  version?: string;
-};
+import type { ClaudeLoginState, ClaudeStatus } from '../../domain/index.ts';
 
 export type CommandResult = {
   exitCode: number;
@@ -99,7 +95,7 @@ function isAuthenticated(stdout: string, exitCode: number): boolean {
 export async function getClaudeReadiness(
   commandRunner: ClaudeCommandRunner = runCommand,
   sourceEnvironment: NodeJS.ProcessEnv = process.env,
-): Promise<ClaudeReadiness> {
+): Promise<ClaudeStatus> {
   const env = createClaudeEnvironment(sourceEnvironment);
   const versionResult = await commandRunner('claude', ['--version'], {
     env,
@@ -124,10 +120,7 @@ export async function getClaudeReadiness(
 }
 
 let activeLogin: ChildProcess | undefined;
-let loginState: {
-  state: 'idle' | 'running' | 'completed' | 'failed';
-  finishedAt?: string;
-} = { state: 'idle' };
+let loginState: ClaudeLoginState = { state: 'idle' };
 
 export function startClaudeLogin(): { started: boolean } {
   if (activeLogin && activeLogin.exitCode === null) return { started: false };
@@ -151,7 +144,7 @@ export function startClaudeLogin(): { started: boolean } {
   return { started: true };
 }
 
-export function getClaudeLoginState() {
+export function getClaudeLoginState(): ClaudeLoginState {
   return { ...loginState };
 }
 

@@ -4,18 +4,19 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 
 import { SkillCatalog } from '../catalog/catalog.ts';
 import {
-  getClaudeReadiness,
   getClaudeLoginState,
+  getClaudeReadiness,
   startClaudeLogin,
   stopClaudeLogin,
 } from '../platform/claude-readiness.ts';
 import { pickProjectDirectory } from '../platform/folder-picker.ts';
+import { StudioDatabase } from '../storage/database.ts';
 import { SkillTestRunner } from '../testing/skill-runner.ts';
-import { StudioDatabase } from '../versions/database.ts';
-import { createStudioApi, type StudioApiRequest } from './studio-api.ts';
+import { createStudioRoutes, type StudioApiRequest, type StudioPlatform } from './routes.ts';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4319;
+const VITE_DEV_PORT = 5173;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
 type StudioServerOptions = {
@@ -23,17 +24,27 @@ type StudioServerOptions = {
   catalog?: SkillCatalog;
   runner?: SkillTestRunner;
   capability?: string;
-  pickProject?: typeof pickProjectDirectory;
-  startLogin?: typeof startClaudeLogin;
+  platform?: Partial<StudioPlatform>;
 };
 
+class RequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+// Requests without an Origin header come from non-browser clients such as curl. Browser requests
+// must come from the Vite dev server or from this server itself.
 function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
     const url = new URL(origin);
     return (
       (url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
-      (url.port === '5173' || url.port === '4319')
+      (url.port === String(VITE_DEV_PORT) || url.port === String(DEFAULT_PORT))
     );
   } catch {
     return false;
@@ -54,25 +65,32 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error('Request body is too large.');
+    if (size > MAX_BODY_BYTES) throw new RequestError(413, 'Request body is too large.');
     chunks.push(buffer);
   }
   if (chunks.length === 0) return undefined;
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  } catch {
+    throw new RequestError(400, 'Request body must be valid JSON.');
+  }
 }
 
-function isMutation(method: string | undefined): boolean {
+function isMutation(method: string): boolean {
   return method === 'POST' || method === 'DELETE';
 }
 
-function traceStream(
+/**
+ * Streams a run's traces as server-sent events. A connecting client first receives every trace
+ * recorded so far, then live ones. The stream ends after the run's single result trace.
+ */
+function streamTraces(
   request: IncomingMessage,
   response: ServerResponse,
   runId: string,
   runner: SkillTestRunner,
 ): void {
-  const snapshot = runner.get(runId);
-  if (!snapshot) {
+  if (!runner.get(runId)) {
     sendJson(response, 404, { error: 'Not found' });
     return;
   }
@@ -84,21 +102,43 @@ function traceStream(
     'X-Accel-Buffering': 'no',
   });
   response.write('retry: 1000\n\n');
-  let sent = 0;
-
-  const unsubscribe = runner.subscribe(runId, (next) => {
-    const traces = next.traces.slice(sent);
-    sent = next.traces.length;
-    for (const trace of traces) {
+  // The trace store keeps a sliding window, so track the last trace sent rather than a count.
+  let lastSentId: string | undefined;
+  let unsubscribe = () => {};
+  unsubscribe = runner.subscribe(runId, ({ traces }) => {
+    if (response.writableEnded) return;
+    const start = lastSentId ? traces.findIndex(({ id }) => id === lastSentId) + 1 : 0;
+    for (const trace of traces.slice(start)) {
       response.write(`id: ${trace.id}\ndata: ${JSON.stringify(trace)}\n\n`);
+      lastSentId = trace.id;
+      if (trace.kind === 'result') {
+        // subscribe() delivers the current snapshot before it returns, so defer the unsubscribe.
+        queueMicrotask(() => unsubscribe());
+        response.end();
+        return;
+      }
     }
   });
+  request.once('close', () => unsubscribe());
+}
 
-  request.once('close', unsubscribe);
+function defaultPlatform(catalog: SkillCatalog): StudioPlatform {
+  return {
+    claudeStatus: () => getClaudeReadiness(),
+    loginState: getClaudeLoginState,
+    startLogin: startClaudeLogin,
+    pickProject: () => pickProjectDirectory(),
+    personalRootExists: () =>
+      access(catalog.personalRoot).then(
+        () => true,
+        () => false,
+      ),
+  };
 }
 
 export function createSkillStudioServer(options: StudioServerOptions = {}) {
   const database = options.database ?? new StudioDatabase();
+  database.markInterruptedRuns();
   const catalog = options.catalog ?? new SkillCatalog({ database });
   const runner =
     options.runner ??
@@ -108,52 +148,11 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
       },
     });
   const capability = options.capability ?? randomBytes(24).toString('base64url');
-  const pickProject = options.pickProject ?? pickProjectDirectory;
-  const startLogin = options.startLogin ?? startClaudeLogin;
-  const api = createStudioApi({
+  const routes = createStudioRoutes({
     catalog,
     database,
-    readiness: async () => {
-      const claude = await getClaudeReadiness();
-      let personalSkillsRoot: 'ready' | 'missing' = 'missing';
-      try {
-        await access(catalog.personalRoot);
-        personalSkillsRoot = 'ready';
-      } catch {
-        // A missing personal root is a valid empty state.
-      }
-      return {
-        claude,
-        authLogin: getClaudeLoginState(),
-        database: 'ready',
-        personalSkillsRoot,
-        activeTests: database.listTestRuns().filter(({ status }) => status === 'running').length,
-      };
-    },
-    launchTest: async ({ skillId, versionId, testCaseId, prompt, model, projectId, settings }) => {
-      const version = database.getVersion(versionId);
-      if (!version || version.skillId !== skillId) throw new Error('Version not found.');
-      const testCase = testCaseId
-        ? database.listTestCases(skillId).find(({ id }) => id === testCaseId)
-        : undefined;
-      const project = projectId ? database.getTrustedProject(projectId) : undefined;
-      if (projectId && !project) throw new Error('Workspace not found.');
-      return runner.launch({
-        skill: version,
-        prompt,
-        model,
-        testCase,
-        settings,
-        workspace: project
-          ? { id: project.id, label: project.label, path: project.path }
-          : undefined,
-      });
-    },
-    cancelTest: async (runId) => {
-      if (!runner.cancel(runId)) return undefined;
-      return runner.get(runId)?.run;
-    },
-    readTestEvents: async (runId) => runner.get(runId)?.traces ?? [],
+    runner,
+    platform: { ...defaultPlatform(catalog), ...options.platform },
   });
 
   const server = createServer(async (request, response) => {
@@ -169,58 +168,45 @@ export function createSkillStudioServer(options: StudioServerOptions = {}) {
         sendJson(response, 200, { service: 'claude-skill-studio', status: 'ok' });
         return;
       }
+      // The browser fetches this once and echoes it on every mutation. Together with the origin
+      // check, it stops other local pages from changing Studio state.
       if (method === 'GET' && url.pathname === '/api/studio/session') {
         sendJson(response, 200, { capability });
         return;
       }
-
       const traceMatch = url.pathname.match(/^\/api\/studio\/test-runs\/([^/]+)\/events$/);
       if (method === 'GET' && traceMatch) {
-        traceStream(request, response, decodeURIComponent(traceMatch[1]!), runner);
+        streamTraces(request, response, decodeURIComponent(traceMatch[1]!), runner);
         return;
       }
-      const activeRunMatch = url.pathname.match(/^\/api\/studio\/test-runs\/([^/]+)$/);
-      if (method === 'GET' && activeRunMatch) {
-        const snapshot = runner.get(decodeURIComponent(activeRunMatch[1]!));
-        if (snapshot) {
-          sendJson(response, 200, { testRun: snapshot.run });
+
+      if (isMutation(method)) {
+        if (request.headers['content-type']?.split(';', 1)[0] !== 'application/json') {
+          sendJson(response, 415, { error: 'JSON content type required' });
+          return;
+        }
+        if (request.headers['x-studio-capability'] !== capability) {
+          sendJson(response, 403, { error: 'Mutation capability rejected' });
           return;
         }
       }
-
-      if (!url.pathname.startsWith('/api/studio/')) {
-        sendJson(response, 404, { error: 'Not found' });
-        return;
-      }
-      if (
-        isMutation(method) &&
-        request.headers['content-type']?.split(';', 1)[0] !== 'application/json'
-      ) {
-        sendJson(response, 415, { error: 'JSON content type required' });
-        return;
-      }
-      const requestCapability = request.headers['x-studio-capability'];
-      if (isMutation(method) && requestCapability !== capability) {
-        sendJson(response, 403, { error: 'Mutation capability rejected' });
-        return;
-      }
-      if (method === 'POST' && url.pathname === '/api/studio/projects/pick') {
-        sendJson(response, 200, { project: await pickProject() });
-        return;
-      }
-      if (method === 'POST' && url.pathname === '/api/studio/auth/login') {
-        sendJson(response, 202, startLogin());
+      if (method !== 'GET' && !isMutation(method)) {
+        sendJson(response, 405, { error: 'Method not allowed' });
         return;
       }
 
       const apiRequest: StudioApiRequest = {
         method: method as StudioApiRequest['method'],
         path: `${url.pathname}${url.search}`,
-        ...(isMutation(method) ? { body: await readJson(request), capability } : {}),
+        ...(isMutation(method) ? { body: await readJson(request) } : {}),
       };
-      const result = await api(apiRequest);
+      const result = await routes(apiRequest);
       sendJson(response, result.status, result.body);
-    } catch {
+    } catch (error) {
+      if (error instanceof RequestError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
       sendJson(response, 400, { error: 'Invalid Skill Studio request' });
     }
   });

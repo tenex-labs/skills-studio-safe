@@ -8,6 +8,6 @@ export type SkillVersion = {
   label: string;
   note?: string;
   createdAt: string;
-  source: 'filesystem' | 'draft' | 'promoted';
+  source: 'filesystem' | 'draft';
   files: SkillFile[];
 };
