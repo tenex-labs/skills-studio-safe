@@ -1,21 +1,23 @@
 # Documentation
 
-- [Architecture](architecture.md) — catalog, storage, runner, SSE, and product boundaries
-- [Conventions](conventions.md) — catalog, SQLite, runner, tests, and frontend rules
-- [Runner event model](event-model.md) — ephemeral progress versus saved final results
-- [Privacy](privacy.md) — local content, CLI disclosure, trust, logs, and backups
+| Document                          | Read it to learn                                                 |
+| --------------------------------- | ---------------------------------------------------------------- |
+| [Architecture](architecture.md)   | How data flows, who owns it, and how a test run works            |
+| [Conventions](conventions.md)     | The coding rules for this repository                             |
+| [Run event model](event-model.md) | The SSE trace contract and what a run saves                      |
+| [Privacy](privacy.md)             | What leaves your machine, what stays, and what a test run can do |
 
 ## Runbooks
 
-- [Local development](runbooks/local-development.md) — install, start, diagnose, and verify
-- [Database backup and recovery](runbooks/database-recovery.md) — consistent backup and restore
-- [Headless testing and troubleshooting](runbooks/headless-testing.md) — `claude -p`, bounds, and failures
-- [Workshop demo](runbooks/workshop-demo.md) — Library-to-experiment demonstration and fallback
+| Runbook                                                       | Use it to                                        |
+| ------------------------------------------------------------- | ------------------------------------------------ |
+| [Local development](runbooks/local-development.md)            | Install, run, verify, and reset local data       |
+| [Headless testing](runbooks/headless-testing.md)              | Diagnose a Test Lab run that fails or hangs      |
+| [Database backup and recovery](runbooks/database-recovery.md) | Back up, restore, or recover the SQLite database |
+| [Workshop demo](runbooks/workshop-demo.md)                    | Present the app end to end                       |
 
 ## Challenges
 
-Each file in [`../challenges/`](../challenges/) is an independent, roughly 20-minute path: validator
-rule, two-lane assertion evidence, precedence/conflict UX, accessibility, or a self-defined slice.
-Prefer deterministic fixtures; a real headless run is optional unless the exercise says otherwise.
-
-The root `README.md` owns the product overview. Architecture and operating details live here.
+Each file in [`../challenges/`](../challenges/) is a self-contained, roughly 20-minute exercise:
+add a validator rule, add an assertion type, clarify precedence conflicts, improve accessibility,
+or design your own slice.

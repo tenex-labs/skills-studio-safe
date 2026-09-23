@@ -8,7 +8,9 @@ Improve one complete workflow for keyboard, focus, semantics, and status announc
 
 ## Build
 
-1. Choose Library, Editor, or one Test Lab lane.
+1. Choose Library, Editor, or one Test Lab lane. Known gaps worth starting from: `Modal` in
+   `app/frontend/ui/components.tsx` does not close on Escape or keep focus inside the dialog, and
+   arrow keys do nothing while typing in a searchable `SelectMenu`.
 2. Navigate it using only the keyboard and inspect its accessible names and landmarks.
 3. Fix the highest-impact problems: semantic controls, visible focus, logical order, labels, and
    announced asynchronous or status changes.
@@ -31,9 +33,9 @@ Improve one complete workflow for keyboard, focus, semantics, and status announc
 ## Verify
 
 Run the focused accessibility test, manually repeat the keyboard workflow at 200% zoom, then run
-`npm test` and `npm run build`.
+`npm run preflight`.
 
 ## Recovery and cleanup
 
-Use fake-runner fixtures if Claude is unavailable. Remove temporary debugging attributes and
+Stop the API to use the demo catalog if Claude is unavailable. Remove temporary debugging attributes and
 restore browser zoom after verification; no real CLI run is required.

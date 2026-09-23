@@ -1,87 +1,85 @@
 # Architecture
 
-Claude Skill Studio is one local browser application and one loopback Node process.
-
-## Components and flow
+Claude Skill Studio is a browser UI and a Node API that listens only on `127.0.0.1:4319`. The API
+owns every filesystem, database, and process operation; the browser only calls it.
 
 ```text
-personal ~/.claude/skills ───────┐
-trusted project .claude/skills ──┴─> catalog scanner ─> Library / Editor
-                                             |
-                                             v
-                                  save version to SQLite
-
-draft + immutable version + test case
-                  |
-                  v
-        bounded runner -> direct `claude -p` (tools disabled, existing CLI auth)
-                  |
-       partial events over SSE ───────────────> Test Lab (ephemeral)
-                  |
-        completed final result
-                  v
-          SQLite -> Test Lab comparison
+ ~/.claude/skills ─────────────────┐
+ trusted <project>/.claude/skills ─┴─▶ catalog ─────▶ SQLite (skills, versions,
+                                         │               ▲    test cases, runs)
+                                         ▼               │ final run record
+ Browser ◀── JSON (routes.ts) ─── API server ──▶ runner ─┴─▶ claude -p (one per run)
+         ◀── SSE traces (server.ts) ───────────────┘
+                     traces: in memory, bounded, evicted 60 s after the run ends
 ```
 
-## Authority and persistence
+## Data and who owns it
 
-The data classes must not blur:
+| Data            | Lives in                    | Written by                                            |
+| --------------- | --------------------------- | ----------------------------------------------------- |
+| Installed skill | `SKILL.md` packages on disk | You, other tools, and Library's **New skill** only    |
+| Catalog rows    | SQLite `skills`             | Every scan; a cache of the last scan, never restored  |
+| Versions        | SQLite `skill_versions`     | A filesystem baseline per scan, plus each Editor save |
+| Test cases      | SQLite `test_cases`         | Test Lab **Save as test case**                        |
+| Run records     | SQLite `test_runs`          | Saved at launch, updated once when the run finishes   |
+| Traces          | Runner memory               | The runner, while a run is active                     |
 
-- **Installed files:** current `SKILL.md` files are the authority for what is installed. A catalog
-  record is a cache/index, not proof that a file still exists.
-- **Version database:** SQLite stores append-only skill-version snapshots, trusted project roots,
-  and supporting metadata. Saving in Editor never mutates installed skill files.
-- **Ephemeral traces:** accepted runner progress events exist only for the active process and SSE
-  subscribers. Disconnecting the browser may lose them. They are not automatically stored.
-- **Saved results:** completed terminal results become durable SQLite records. Each references the
-  exact skill version, test case, runner settings, and outcome.
+Versions are immutable. A save creates a new row whose parent is the version the editor started
+from. If that base revision is unknown to Studio, the save is rejected with a revision conflict
+instead of creating a version with no parent.
 
 ## Catalog and precedence
 
-The catalog scans `~/.claude/skills` and only project roots the user selected with the native folder
-picker and explicitly trusted. It validates that resolved paths stay within the expected skills root
-and does not follow an escaping symlink.
-Malformed skills appear as actionable validation findings rather than disappearing.
+The catalog scans `~/.claude/skills` and the `.claude/skills` folder of each trusted project. It
+resolves real paths and skips any package or file that escapes its root through a symlink.
+Personal skills may be symlinks to managed locations; those are marked read-only in the UI.
+Malformed skills still appear, with validation findings explaining what is wrong.
 
-Personal and project skills are separate installations. In the context of a trusted project, a
-same-name personal skill wins over the project skill. The UI shows the conflict, both locations,
-and the winner. Outside that project context, the personal skill remains effective. No content is
-merged automatically.
+When a personal and a project skill share a command name, Claude Code uses the personal one. The
+catalog marks the project skill `shadowedBy` the personal skill and adds a warning. Content is never
+merged.
 
-## Product areas
+## Test runs
 
-- **Library:** sources, scope, validity, precedence, conflict, installed state, and rescan.
-- **Editor:** tabbed Markdown/preview editing, validation findings, confirmed local saves, immutable
-  version history, and editable working copies of managed sources.
-- **Test Lab:** shared test input, two independently configured bounded runs, readable outputs,
-  transient trace details, aligned metadata, assertions, and saved final results.
+`POST /api/studio/test-runs` resolves the stored version, optional test case, and optional trusted
+workspace, then hands them to `SkillTestRunner`:
 
-## Runner boundary
+1. The skill's files are copied into a private temp directory under a unique command name such as
+   `skill-test-<id>`. The copy can never collide with, or overwrite, an installed skill.
+2. The runner spawns `claude -p` directly (no shell) with the model, effort, budget, and tool
+   settings, no MCP servers, and an allowlisted environment. The prompt goes in on stdin.
+3. `stream-parser.ts` reduces each stream-json line to a small event. Tool inputs and results are
+   dropped; tool names become coarse categories such as `Filesystem`.
+4. The runner turns events into traces, enforces the turn limit, and kills the process group on
+   timeout or cancel.
+5. When the process ends, the runner records the final status, output, usage, and assertion
+   results, persists the run, and only then emits the single `result` trace.
 
-The server starts `claude -p` directly as a child process. It reuses the Claude CLI's existing
-authentication and supplies no API key. Every run has a fixed timeout, output limit, cancellation
-path, and either no tools or a read-only trusted-workspace preset. Input is passed without shell
-interpolation. The runner
-captures structured progress where available, emits a small normalized event model over SSE, and
-produces one terminal outcome. A timeout, cancellation, spawn failure, or malformed event is a
-first-class terminal state.
+At most two runs execute at once; the rest queue. Finished runs stay in memory for 60 seconds so a
+late client can still read them, then only the database copy remains. When the server starts, any
+run still marked queued or running belongs to a process that no longer exists and is marked
+`interrupted`.
 
-OAuth remains Claude Code's responsibility. When a run reports an expired token, the server may
-launch the official `claude auth login` process, but it never reads or stores the resulting
-credentials.
+With a trusted workspace selected, Claude starts in that project so it sees the project's own
+context and settings, and the temp copy of the skill is added with `--add-dir`.
 
-The browser never starts processes or accesses skill files directly. The server validates all API
-input and owns catalog, filesystem, SQLite, and process I/O.
+## Security at the HTTP boundary
 
-## Consistency and recovery
+- The server binds to loopback and rejects browser origins other than the Vite dev server and
+  itself.
+- Mutations must be JSON and carry the per-process capability from `GET /api/studio/session`. This
+  stops other local web pages from changing Studio state.
+- Request bodies are capped at 6 MB. Route handlers validate every field before use.
+- Errors map to 400, 404, or 409 with a safe message. Anything unexpected is a generic 500.
 
-- Rescan files after external edits; filesystem state wins for installed content.
-- Never replace an installed skill from Editor; save working copies to SQLite version history.
-- Use SQLite transactions for linked version, test, assertion, and saved-result records.
-- On startup, mark abandoned running records interrupted without inventing a final result.
-- Do not reconstruct an installed skill from SQLite except through an explicit user recovery action.
+## Frontend
 
-## Intentionally omitted
+`useStudio` holds application state and talks to a `StudioApi`. There are two implementations:
+`studioApi` calls the server, and `createDemoApi()` serves fixtures from memory when the server is
+unreachable. Views receive data and callbacks as props and do not fetch on their own.
 
-Cursor skills, deployment, application authentication, cloud storage or sync, remote telemetry,
-multi-user collaboration, background schedules, and tool-enabled Claude test runs.
+## Not built
+
+Restoring a version over an installed skill, deleting versions or runs, removing a trusted project
+from the UI (the API supports it), live validation while typing, and run history in Test Lab.
+Cursor skills, deployment, app authentication, cloud sync, and telemetry are out of scope.

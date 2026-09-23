@@ -1,39 +1,31 @@
 # Headless testing and troubleshooting
 
-Test Lab invokes the installed Claude CLI directly with `claude -p`. It uses the
-user's existing authentication, disables tools, and applies fixed time, output, and concurrency
-bounds.
+Test Lab runs each configuration as its own `claude -p` process. The runner and its limits are
+described in [architecture](../architecture.md#test-runs); this page is for when a run goes wrong.
 
-## Safe manual proof
+## Try it safely
 
-Use a disposable test case and demo skill. Start one run from Test Lab and verify:
+Pick a small skill, keep **Repository access** on **No tools**, and use a short prompt. Check that:
 
-- the command is spawned without a shell;
-- tools are unavailable;
-- active progress arrives over loopback SSE;
-- cancel and timeout terminate the child process;
-- a terminal result identifies the exact skill version and test case;
-- the partial trace is absent after restart;
-- the final result is durable only when the UI's save policy says it is saved.
+- output streams into the lane while the status reads `running`;
+- the status changes to a final value on its own when the run ends;
+- **Cancel** ends the run as `cancelled` within about a second;
+- a run appears in `GET /api/studio/test-runs` with its final output after a page reload.
 
-Avoid pasting the generated command into a shell: the application should pass arguments directly.
+Do not paste the command into a shell to reproduce a run. The runner passes arguments directly and
+the prompt on stdin.
 
-## Common failures
+## When something fails
 
-- **CLI missing:** install the supported Claude CLI and restart the app.
-- **Authentication required:** authenticate through the Claude CLI outside the Studio. The Studio
-  must never request or store the credential. `claude auth status` can report an account even when
-  an OAuth access token has expired; the live run result is authoritative.
-- **Timeout/output limit:** narrow the test or bounds; retain the terminal category but do not save
-  partial output as a completed result.
-- **SSE disconnected:** the run may continue, but trace replay is not guaranteed. Reconnect for
-  current state and inspect the terminal result.
-- **Run appears stuck:** cancel once, verify the child process exits, and inspect redacted server
-  diagnostics. Never dump the prompt or process environment.
-- **Assertion fails:** preserve the model result and assertion evidence separately; a completed run
-  can have failed assertions.
-- **Project skill unavailable:** confirm the project is explicitly trusted and rescan. Do not widen
-  trust automatically.
+| Symptom                               | Likely cause and fix                                                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| "Claude account required"             | The CLI is missing or signed out. Install it or run `claude auth login`, then reload.                       |
+| Run fails with an expired OAuth token | `claude auth status` can report an account whose token expired. Use **Re-authenticate Claude** in Test Lab. |
+| `timed-out`                           | The task needs more time or turns. Raise the limits under **Advanced settings**, or narrow the prompt.      |
+| `failed` after the turn limit warning | The model kept going past the turn limit. Raise **Turns** or tighten the skill.                             |
+| Status stuck on `running`             | The API server stopped mid-run. Restart it; the run becomes `interrupted`.                                  |
+| Assertions fail on a `passed` run     | Expected. Status is about the process; assertions are about the output. Check the expected phrases.         |
+| Project skill missing from Skill list | The project is not trusted, or the skill is invalid. Trust the project in Library and check its findings.   |
 
-Use deterministic fake-runner tests in normal CI. Real `claude -p` proof is opt-in because it
-depends on local authentication, network access, model behavior, and usage limits.
+Automated tests use a fake Claude process. Real `claude -p` runs are manual because they depend on
+your account, network, model behavior, and usage limits.

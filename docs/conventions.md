@@ -1,61 +1,53 @@
 # Conventions
 
-These rules keep Claude Skill Studio direct and recoverable.
+These are the rules this codebase follows. `.claude/rules/` repeats the relevant ones for each
+folder so Claude Code sees them while editing there; this file is the source.
 
-## TypeScript and domain code
+## TypeScript
 
-- Keep TypeScript strict. Validate external `unknown` values before narrowing; do not introduce
-  unvalidated `any`.
-- Prefer domain names such as `SkillSource`, `SkillVersion`, `TestCase`, `TestRun`, and `SavedResult`
-  over generic managers, helpers, factories, or base classes.
-- Give each decision one owner. For example, one pure projection decides whether a run needs
-  attention.
-- Separate pure normalization and projection logic from HTTP, storage, timers, and browser effects.
-- Represent finite states with discriminated unions or const objects.
-- Use immutable transformations and specific errors with actionable messages.
-- Delete replaced paths instead of leaving compatibility wrappers without a current caller.
+- Strict mode everywhere, including tests. Treat external input as `unknown` and narrow it with a
+  check, not a cast.
+- Put a type or rule in `app/domain/` when both the backend and the frontend need it. Limits,
+  effort levels, launch input, frontmatter parsing, and assertion evaluation live there so each has
+  one definition.
+- Keep pure logic separate from I/O. The stream parser, assertions, validator, and view-model
+  helpers take values and return values; the runner, catalog, storage, and server do the I/O.
+- Model finite states as string-literal unions (`SkillTestStatus`, `SkillTestTrace['kind']`) and
+  switch over them exhaustively.
+- Throw `StudioValidationError`, `StudioNotFoundError`, or `RevisionConflictError` from
+  `app/backend/errors.ts` for anything a user can cause. The routes map them to 400, 404, and 409.
+- Delete code when its last caller goes away.
 
-## Catalog and filesystem
+## Backend
 
-- Filesystem `SKILL.md` content is installed authority; database rows are never a silent substitute.
-- Canonicalize paths and keep reads/writes inside personal or explicitly trusted project roots.
-- Model personal and project sources separately. Compute precedence; never merge same-name content.
-- Rescan safely after external changes and represent malformed, missing, or conflicting skills.
-- Save editor changes as immutable Studio versions without replacing installed skill files.
+- **Catalog:** installed files are the source of truth. Canonicalize paths and stay inside
+  personal or trusted roots. Compute precedence; never merge same-name skills.
+- **Storage:** add a new migration for every schema change and never edit one that has shipped.
+  Use parameterized queries. JSON columns are read defensively.
+- **Runner:** spawn `claude -p` directly with separate arguments. Keep the no-tools default and
+  the read-only preset as the only tool options. Every run ends with exactly one `result` trace.
+- **API:** add an endpoint as one entry in the route table in `routes.ts`. Validate each body
+  field with the helpers there. Transport and security concerns stay in `server.ts`.
 
-## SQLite
+## Frontend
 
-- Use migrations, foreign keys, transactions, parameterized queries, and explicit retention.
-- Treat skill versions, test cases used by a run, and saved results as immutable records.
-- Do not persist active trace chunks or create a saved result for a non-completed run.
-- Keep database paths configurable and outside the repository.
-
-## Runner and events
-
-- Spawn `claude -p` directly without shell interpolation and reuse existing CLI authentication.
-- Disable tools and enforce timeout, output, concurrency, and cancellation bounds.
-- Normalize only known runner events. Unknown input is ignored or rejected without dumping content.
-- Use SSE only for active progress. One terminal event ends a run; reconnect is not durable replay.
-- Separate process status from assertion status and result save status.
-
-## React
-
-- Keep components focused on presentation or orchestration.
-- Derive state rather than synchronizing duplicate state.
-- Render loading, empty, error, permission, and success behavior deliberately.
-- Start with semantic elements. Preserve keyboard operation, visible focus, meaningful labels, and
-  status announcements.
-- Label source scope, effective precedence, draft/installed state, active/saved state, and runner
-  terminal status in user-facing text.
-- Preserve semantic navigation and keyboard-complete Library, Editor, and two-lane Test Lab flows.
+- `useStudio` owns state and talks to a `StudioApi`. Views get data and callbacks through props
+  and never fetch.
+- New API methods go on the `StudioApi` interface and in both clients (`api.ts` and
+  `demo-api.ts`).
+- Derive display text with pure helpers in `model/skill-view-model.ts`.
+- Use semantic elements first, label every control, keep focus visible, and announce
+  asynchronous status changes with `role="status"` or `role="alert"`.
+- Label scope, precedence, draft versus installed, and run status in words, not color alone.
+- All styles live in `shell/styles.css`, using the custom properties defined at its top.
 
 ## Tests
 
-- Place focused tests beside the behavior or in the matching `tests/` area.
-- Assert behavior and boundaries, not component internals.
-- Use deterministic time and identifiers.
-- Test path escape, untrusted projects, precedence, interrupted runs, and persistence boundaries as
-  first-class behavior.
-- Use snapshots only when the complete rendered structure is the behavior under test.
+- `tests/` mirrors `app/`: `app/backend/testing/skill-runner.ts` is tested in
+  `tests/backend/testing/skill-runner.test.ts`.
+- Assert behavior a user or caller can observe, not component internals.
+- Use fixed timestamps and IDs. Fake the Claude process; real `claude -p` runs are manual only.
+- Cover the boundaries: path escapes, untrusted projects, precedence, runner limits, cancellation,
+  every terminal status, and what does or does not get saved.
 
-Do not add an abstraction, dependency, or architectural layer for an imagined future variant.
+Do not add an abstraction, dependency, or layer for a variant that does not exist yet.

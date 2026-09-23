@@ -4,25 +4,27 @@
 
 ## Outcome
 
-Add one useful, deterministic `SKILL.md` validation finding, such as missing frontmatter
-description, invalid name, or an empty instruction body.
+`SKILL.md` gets one new, useful validation finding, such as an empty instruction body, a
+description that never says when to use the skill, or a missing top-level heading.
 
 ## Build
 
-1. Find the pure skill validator and its Library/Editor presentation.
-2. Add one rule with a stable code, severity, concise message, and source location when available.
-3. Show the finding on drafts and installed skills without blocking catalog discovery.
-4. Add valid, invalid, and boundary fixtures.
+1. Read the pure validator in `app/backend/catalog/validator.ts` and its tests.
+2. Add one rule with a stable `id`, a severity, a short message, and a line number when you can.
+3. Add valid, invalid, and boundary fixtures in `tests/backend/catalog/validator.test.ts`.
+4. Confirm the finding appears in Library and Editor for an installed skill.
+
+**Stretch:** Editor findings come from the last scan, so they do not update while you type.
+`POST /api/studio/validate` already validates a working copy without saving it. Wire it into the
+Editor so findings refresh after edits.
 
 ## Constraints
 
-- Do not read outside the selected skill directory.
-- A malformed skill remains visible and repairable.
-- Keep parsing/validation pure; do not write files or database rows.
-- Avoid a broad parser rewrite.
+- Keep the validator pure: no file or database access.
+- A skill with the new finding still appears in the catalog and can be edited.
+- Avoid rewriting the parser; frontmatter parsing lives in `app/domain/frontmatter.ts`.
 
 ## Acceptance and verification
 
-The rule produces one predictable finding, does not duplicate existing findings, and clears after
-the issue is fixed. Add focused validator and rendering tests, run them, then run
-`npm run preflight` if available.
+The rule produces one predictable finding, does not duplicate an existing one, and disappears once
+the problem is fixed. Run the validator tests, then `npm run preflight`.

@@ -1,38 +1,42 @@
-# Target runner event model
+# Run event model
 
-The runner converts bounded child-process progress into one browser-facing shape. Names may be
-adjusted during integration, but the persistence boundary must remain:
+The browser follows a run through `GET /api/studio/test-runs/:id/events`, a server-sent event
+stream of `SkillTestTrace` objects (defined in `app/domain/testing.ts`).
 
 ```ts
-type RunnerEvent = {
-  id: string;
-  runId: string;
-  sequence: number;
-  timestamp: string;
-  kind: 'started' | 'progress' | 'assertion' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
-  message?: string;
-  assertionId?: string;
-  assertionStatus?: 'passed' | 'failed';
-};
+type SkillTestTrace = { id: string; timestamp: string } & (
+  | { kind: 'process'; state: 'queued' | 'preparing' | 'running' | 'initialized' }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'tool'; name: string; status: 'started' | 'completed' }
+  | { kind: 'warning'; message: string }
+  | { kind: 'result'; status: TerminalTestStatus }
+);
 ```
 
-## Invariants
+`TerminalTestStatus` is `passed`, `failed`, `cancelled`, `timed-out`, or `interrupted`.
 
-- `timestamp` is an ISO 8601 string.
-- `runId` is server-issued and `sequence` increases within a run.
-- `kind` is finite; exactly one terminal event ends a run.
-- `message` is bounded display output, not an operational log field.
-- Events may be lost on disconnect or restart. SSE is not a history API.
-- Tools are disabled; tool lifecycle events are not part of this model.
-- Unknown CLI event shapes never pass through wholesale.
+## Guarantees
 
-## Source mapping
+- Every run emits exactly one `result` trace, and it is the last one. By the time it is sent, the
+  run's final record is saved, so a client that sees it can fetch `GET /test-runs/:id` and get the
+  final state.
+- The server ends the stream after the `result` trace.
+- A client that connects late receives the traces still in memory first, then live ones.
+  Reconnecting can repeat traces, so clients should keep each trace `id` once.
+- The trace window keeps the latest 500 traces per run and truncates free text to 4,000
+  characters. It is not a history API.
+- `tool` traces carry only a coarse category (`Skill`, `Shell`, `Filesystem`, `Network`, `Agent`,
+  `Other`), never tool inputs or results.
+- `warning` messages are fixed strings written by the runner. Claude's stderr is never forwarded.
 
-The active trace is ephemeral. On successful completion, the server constructs a separate final
-result containing terminal status, bounded final output, timings, assertion outcomes, and references
-to the immutable skill version, test case, model/configuration, and runner version. Saving that final
-result is an explicit database operation. Progress events themselves are not copied into SQLite.
+## Status versus assertions
 
-Spawn errors, CLI authentication errors, timeout, cancellation, output-limit termination, and
-malformed output remain distinct. A browser disconnect does not cancel a run unless the user asks;
-it also does not guarantee trace replay.
+`status` describes the Claude process: `passed` means it exited cleanly with a successful result.
+Assertions from a test case are evaluated once, against the final output, and stored separately in
+`run.assertions`. A run can pass while one of its assertions fails.
+
+## What gets saved
+
+The run record is saved when the run is launched and updated once when it finishes: status,
+timings, exit code, final output (up to 32,000 characters), usage, and assertion results. Traces
+are never written to the database.

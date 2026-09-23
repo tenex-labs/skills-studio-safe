@@ -6,12 +6,10 @@ paths:
 
 # Test rules
 
-- Assert observable behavior, authority, trust, and persistence boundaries.
-- Use deterministic timestamps, identifiers, and fixtures.
-- Cover loading, empty, error, permission, and success states when relevant.
-- Prove untrusted projects and escaping paths are not read.
-- Cover personal/project precedence, immutable version provenance, runner bounds, cancellation, and
-  terminal states.
-- Prove partial traces are not saved and only completed final results enter durable history.
-- Fake the runner by default; real `claude -p` tests must be explicit and opt-in.
-- Prefer focused tests beside the behavior they protect; avoid broad snapshots.
+See `docs/conventions.md#tests`.
+
+- Mirror `app/`: each source file's tests live at the same relative path under `tests/`.
+- Assert observable behavior, not component internals. Use fixed timestamps and IDs.
+- Fake the Claude process. Real `claude -p` runs are manual only.
+- Cover path escapes, untrusted projects, precedence, runner limits, cancellation, every terminal
+  status, and what is or is not persisted.

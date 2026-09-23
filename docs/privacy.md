@@ -1,55 +1,49 @@
-# Target privacy and data contract
+# Privacy and data handling
 
-Claude Skill Studio handles content by design: skill bodies, test prompts, and final model output.
-Privacy therefore depends on explicit purpose, local storage boundaries, redacted operational logs,
-and honest disclosure—not on claiming content is never processed.
+Skill Studio handles sensitive content by design: skill files, test prompts, and model output. This
+page states exactly where that content goes.
 
-## Data classes
+## What leaves your machine
 
-### Installed files
+Test runs call your local `claude` CLI, which sends the skill, the prompt, and normal Claude Code
+context to Anthropic under your existing Claude account and settings. "Local app" does not mean
+inference is offline. Studio itself adds no cloud sync, analytics, telemetry, or hosted account.
 
-Personal and trusted-project `SKILL.md` files remain at their original filesystem locations. The
-catalog reads them to validate and edit them. A project is not read until the user explicitly trusts
-its root.
+## What stays on your machine
 
-### SQLite
+| Data             | Where                                                                                                                                                     | How long                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Installed skills | Their original folders                                                                                                                                    | Studio never deletes them                        |
+| SQLite database  | macOS: `~/Library/Application Support/Claude Skill Studio/`; Linux: `$XDG_DATA_HOME/claude-skill-studio/`; Windows: `%LOCALAPPDATA%\Claude Skill Studio\` | Until you delete it                              |
+| Traces           | API server memory                                                                                                                                         | Until 60 s after the run ends, or server restart |
+| Temp skill copy  | A private temp directory (mode 700)                                                                                                                       | Deleted when the run ends                        |
 
-SQLite may contain trusted project roots, immutable skill-version content, test prompts, assertion
-definitions, runner settings, and final results the user chose to save. It must not contain Claude
-credentials, environment dumps, or automatic copies of partial traces.
+The database holds trusted project paths, skill versions, test cases, and run records, including
+prompts and final output. Every run is saved automatically when it starts and when it finishes.
+The database file is created with owner-only permissions. It never holds credentials or
+environment values.
 
-### Ephemeral traces
+## What a test run can do
 
-Partial runner output is held in bounded memory and streamed to the active browser over loopback SSE.
-It is discarded when the run ends, is cancelled, or the server restarts. Trace payloads must not be
-written to general logs.
+- **No tools** (default): the model can only answer.
+- **Read-only repository**: the model can use `Read`, `Glob`, and `Grep`. With a trusted workspace
+  selected, that means it can read that project.
+- No write, shell, network, or MCP tools are ever enabled. Each run has a turn limit (at most 20),
+  a timeout (10–300 s), and a $0.25 budget cap.
+- With a trusted workspace selected, Claude loads that project's `.claude` settings, just as it
+  would if you ran `claude` there yourself. Only trust projects whose settings and hooks you trust.
+- The process receives only the environment variables it needs to find and authenticate the CLI
+  (`PATH`, `HOME`, locale, and Claude credential variables).
 
-### Saved final results
+## Controls in the code
 
-A completed final response and assertion evidence become durable only through the save policy shown
-in Test Lab. Saved results are linked to immutable version and test-case identifiers and can be
-deleted without changing installed files.
+1. The API binds to loopback, checks browser origins, and requires a per-process capability for
+   every change.
+2. Paths are canonicalized; traversal and symlink escapes are rejected.
+3. Projects are read only after explicit trust through the native folder picker.
+4. `claude -p` is spawned without a shell; the prompt is sent on stdin, never as an argument.
+5. Traces drop tool inputs, tool results, and stderr before anything reaches the browser.
+6. Server logs never contain prompts, skill content, output, credentials, or environment values.
 
-## External disclosure
-
-Tests invoke the locally installed `claude -p` and use its existing authentication. The selected
-skill text, test prompt, and normal CLI context are sent to Anthropic under the user's Claude CLI
-configuration. The Studio adds no cloud sync, analytics, hosted account, API key store, or remote
-telemetry. “Local application” does not mean model inference is offline.
-
-## Required controls
-
-1. Bind the application server to loopback and restrict browser origins.
-2. Treat paths and API payloads as untrusted; canonicalize roots and reject traversal or symlink
-   escape.
-3. Require explicit project trust before scan, read, or test.
-4. Spawn `claude -p` without a shell, disable tools, enforce time/output limits, and support cancel.
-5. Never log skill bodies, prompts, final output, trace chunks, credentials, environment values, or
-   full home-directory paths.
-6. Parameterize SQLite access and keep database and backup files outside version control.
-7. Show whether final output will be saved, and never convert an interrupted trace into a result.
-8. Redact user-facing errors while retaining actionable categories such as timeout or CLI auth
-   failure.
-
-Backups contain the same sensitive content as SQLite. Store them with user-only permissions, never
-attach them to workshop submissions, and delete temporary restore copies after verification.
+Backups of the database contain the same sensitive content. Keep them outside repositories and
+never attach them to workshop submissions.

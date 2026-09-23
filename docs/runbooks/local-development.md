@@ -1,30 +1,32 @@
 # Local development
 
-## Install and start
+## Run it
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the printed loopback URL. Use an installed, authenticated Claude CLI only for a real Test Lab
-run; the application must reuse existing CLI authentication.
+This starts the API on `127.0.0.1:4319` and the UI on `http://localhost:5173`. Vite proxies
+`/api` to the API. If port 4319 is taken, another Studio server is probably still running; stop it
+first.
 
-Run `npm run preflight` before handoff.
+Before handing off a change, run `npm run preflight`. It checks formatting, lint, and types, then
+runs every test and a production build.
 
-## Development checks
+## Check the main paths by hand
 
-- Library shows personal skills and no project skills until a root is explicitly trusted.
-- Same-name personal/project skills show both sources and the personal winner.
-- Editing a draft does not change its installed file.
-- Test Lab can use fixtures without invoking Claude; an integration test may invoke bounded
-  no-tools `claude -p` only when explicitly enabled.
-- Partial traces disappear after termination; completed final results survive restart.
-- `npm run preflight` runs formatting, lint, typecheck, tests, and build.
+- Library lists your personal skills and no project skills until you trust a project.
+- A skill with the same name in both scopes shows the project copy as shadowed.
+- Saving in Editor adds a version but leaves the installed `SKILL.md` unchanged.
+- A Test Lab run streams output, ends with a final status, and survives a page reload in
+  `GET /api/studio/test-runs`.
+- With the API stopped, the UI shows the labeled demo catalog and can still run demo tests.
 
-## Reset and cleanup
+## Reset local data
 
-Stop the dev process with `Ctrl-C` and cancel any active test first. Do not delete personal or
-project skills to reset application state. Back up SQLite, then use the implementation's explicit
-reset path or remove only the documented local application-data directory. Never commit the
-database, backups, traces, or generated test output.
+Stop the app first. Studio keeps all of its state in one SQLite database (see
+[privacy](../privacy.md) for the path per platform). To start fresh, back it up if you need it,
+then delete that folder. Your installed skills are not in it and are not affected.
+
+Never commit the database, backups, or test output.

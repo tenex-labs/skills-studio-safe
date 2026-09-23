@@ -1,13 +1,14 @@
 ---
 paths:
-  - 'app/backend/versions/**/*.ts'
+  - 'app/backend/storage/**/*.ts'
 ---
 
 # Storage rules
 
-- Use migrations, foreign keys, transactions, and parameterized SQLite queries.
-- Keep immutable skill versions, run-bound test cases, and saved final results append-only.
-- Never treat a catalog row as proof that a skill is installed.
-- Never persist active partial traces or create a completed result for an interrupted run.
-- Keep databases and backups outside the repository and out of logs.
-- Recovery from a version to an installed file is explicit, previewed, and scoped.
+See `docs/conventions.md#backend`.
+
+- Add a new migration for every schema change; never edit a migration that has shipped.
+- Use parameterized queries and transactions for multi-row writes.
+- Skill versions are immutable. Run records are written at launch and updated once at finish.
+- Never store traces, credentials, or environment values.
+- A catalog row is not proof that a skill is installed.

@@ -1,39 +1,42 @@
 # Database backup and recovery
 
-SQLite contains immutable skill versions, test cases, trusted project roots, and saved final
-results. It is not the authority for installed skills.
-
-## Locate and inspect
-
-Stop the app. On macOS, the database is
-`~/Library/Application Support/Claude Skill Studio/studio.sqlite`. Windows uses the current user's
-local application-data directory; Linux uses `$XDG_DATA_HOME/claude-skill-studio` or
-`~/.local/share/claude-skill-studio`.
+The SQLite database holds trusted project paths, skill versions, test cases, and run records. It is
+not the source of truth for installed skills; those stay on disk. See [privacy](../privacy.md) for
+the database location on each platform.
 
 ## Back up
 
-1. Cancel active Test Lab runs.
-2. Stop the local server, or use a verified SQLite online-backup operation.
-3. Copy the database with its file permissions to a dated file outside the repository.
-4. If WAL mode is active, do not copy only the main file while the app is running.
-5. Verify the backup with SQLite's integrity check and record the application schema version.
+1. Cancel active Test Lab runs and stop the dev server. The database uses WAL mode, so copying only
+   `studio.sqlite` while the server runs can miss recent writes.
+2. Copy `studio.sqlite` (and any `-wal` or `-shm` files beside it) to a dated folder outside every
+   repository.
+3. Check the copy: `sqlite3 <copy>/studio.sqlite "PRAGMA integrity_check;"` should print `ok`.
 
-Backups contain skill text, prompts, and saved model output. Treat them as sensitive local files.
+Backups contain skill text, prompts, and model output. Keep them private.
 
 ## Restore
 
-1. Stop the app and preserve the current database as a rollback copy.
-2. Restore the selected backup to a temporary path.
-3. Run SQLite integrity checking before replacement.
-4. Replace the database atomically and start the app so normal migrations run.
-5. Rescan installed skill roots. Filesystem content wins if catalog metadata differs.
-6. Verify Library sources, trusted roots, test cases, and several saved-result provenance links.
+1. Stop the server and move the current database aside as a rollback copy.
+2. Run the integrity check on the backup, then copy it into place.
+3. Start the app. Migrations bring an older backup up to date. A backup from a newer version of
+   the app is refused rather than downgraded.
+4. Open Library to rescan. Installed files win wherever the database disagrees.
 
-Do not write database versions over installed `SKILL.md` files during restore. Restoring an older
-skill version is a separate explicit recovery action that previews target scope and content first.
+## Recovering a skill's content
 
-## Failure recovery
+Studio does not write versions back to disk, and the Editor timeline shows only summaries. To bring
+back an older version, read its files from a copy of the database and paste what you need into the
+installed file yourself:
 
-If integrity or migration fails, stop, restore the rollback copy, and retain the failed file for
-local diagnosis without uploading it. Never solve schema mismatch by deleting personal or project
-skills.
+```bash
+sqlite3 <copy>/studio.sqlite \
+  "SELECT v.label, f.path, f.content FROM skill_versions v
+   JOIN version_files f ON f.version_id = v.id
+   JOIN skills s ON s.id = v.skill_id
+   WHERE s.name = 'my-skill' ORDER BY v.created_at DESC;"
+```
+
+## If migration or integrity fails
+
+Stop, restore the rollback copy, and keep the failed file locally for diagnosis. Never fix a schema
+problem by deleting personal or project skills.

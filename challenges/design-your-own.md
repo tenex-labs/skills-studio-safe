@@ -21,8 +21,9 @@ Ask only questions whose answers would materially change the slice.
 
 ## Constraints
 
-- Keep installed files, immutable versions, test cases, ephemeral traces, and saved results distinct.
-- Do not add Cursor skills, application auth, cloud services, deployment, or tool-enabled runs.
+- Keep installed files, immutable versions, test cases, live traces, and saved runs distinct.
+- Do not add Cursor skills, application auth, cloud services, deployment, or any tool beyond the
+  read-only preset.
 - Never trust a project implicitly or merge same-name skill content.
 - Choose an existing Library, Editor, Test Lab, catalog, storage, or runner seam.
 - Prefer one vertical slice with focused tests over placeholders.
@@ -36,8 +37,8 @@ Ask only questions whose answers would materially change the slice.
 
 ## Verify
 
-Run focused verification for the stated outcome, then `npm test`, `npm run build`, and a final diff
-review against `docs/privacy.md` and `docs/architecture.md`.
+Run focused verification for the stated outcome, then `npm run preflight` and a final diff review
+against `docs/privacy.md` and `docs/architecture.md`.
 
 ## Recovery and cleanup
 

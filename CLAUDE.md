@@ -1,48 +1,43 @@
 # Claude Skill Studio
 
-Local Claude Code skill management and test application.
-
-## Product and storage contract
-
-- Library discovers personal `~/.claude/skills` and explicitly trusted project `.claude/skills`.
-- Editor saves immutable local versions without overwriting installed skill files.
-- Test Lab runs two bounded, no-tools `claude -p` configurations against shared input and compares
-  their saved results.
-- The filesystem is the authority for installed state.
-- SQLite stores trusted roots, immutable versions, test cases, and saved final results.
-- Active partial traces are ephemeral SSE data and are not persisted as results.
+A local app for managing and testing Claude Code skills: a React UI (Vite) and a loopback Node API
+with SQLite. See `README.md` for the product and `docs/` for details.
 
 ## Commands
 
 ```bash
-npm install
-npm run dev
-npm run preflight
+npm run dev        # API (tsx watch) and UI (Vite) together
+npm test           # Vitest, all suites
+npm run preflight  # format:check, lint, typecheck, test, build — run before handing off
 ```
 
 ## Code map
 
-- `app/domain/` — pure Skill Studio contracts
-- `app/backend/catalog/` — skill discovery, validation, and safe filesystem access
-- `app/backend/versions/` — SQLite migrations, versions, test cases, and results
-- `app/backend/testing/` — bounded Claude subprocess and ephemeral traces
-- `app/backend/api/` — loopback HTTP, SSE, origin, and mutation security
-- `app/frontend/shell/` — browser shell and global styling
-- `app/frontend/state/` — API client and application orchestration
-- `app/frontend/features/` — Library, Editor, and the two-lane Test Lab
-- `app/frontend/model/` — pure presentation projections
-- `app/frontend/ui/` — reusable accessible components
-- `app/entrypoints/` — browser and server startup
-- `tests/` — boundary-mirrored backend and frontend tests
+| Path                     | Owns                                                                        |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `app/domain/`            | Shared types and pure logic used by both sides (frontmatter, assertions)    |
+| `app/backend/api/`       | `server.ts`: HTTP, origin and capability checks, SSE. `routes.ts`: JSON API |
+| `app/backend/catalog/`   | Skill discovery, trust, precedence, validation                              |
+| `app/backend/storage/`   | SQLite schema, migrations, and queries                                      |
+| `app/backend/testing/`   | The `claude -p` runner, stream parsing, test packages, trace window         |
+| `app/backend/platform/`  | Claude CLI status and login, native folder picker                           |
+| `app/frontend/state/`    | `StudioApi` interface, live and demo clients, `useStudio` orchestration     |
+| `app/frontend/features/` | Library, Editor, and Test Lab views                                         |
+| `app/frontend/model/`    | Pure display helpers                                                        |
+| `app/frontend/ui/`       | Reusable components                                                         |
+| `app/frontend/shell/`    | App frame, navigation, readiness bar, and the single `styles.css`           |
+| `tests/`                 | Mirrors `app/` one-to-one                                                   |
+| `.claude/`               | Path-scoped rules and example skills used in the workshop                   |
 
 ## Boundaries
 
-Read `docs/architecture.md`, `docs/conventions.md`, and `docs/privacy.md` first. Keep external I/O at
-catalog, storage, runner, and HTTP/SSE boundaries. Validate filesystem paths, database input, API
-input, and runner events. Never infer project trust, silently merge same-name skills, enable Claude
-tools during tests, persist partial traces, or log prompts, skill bodies, model output, credentials,
-or environment values.
+- Editor saves create database versions only. The only code that writes installed skill files is
+  `SkillCatalog.createSkill`.
+- Never scan or run in a project the user has not trusted.
+- Test runs have no tools unless the user picks the read-only preset (`Read,Glob,Grep`). Never add
+  write, shell, network, or MCP tools.
+- Traces stay in memory. Only the final run record is saved.
+- Never log prompts, skill content, model output, credentials, or environment values.
+- Out of scope: Cursor skills, deployment, app authentication, cloud sync, telemetry.
 
-Do not add Cursor skill support, deployment, application auth, cloud services, remote telemetry, or
-background agents. Changed behavior needs focused tests, `npm run preflight`, and a
-final diff review that preserves existing work.
+Conventions live in `docs/conventions.md`; path-scoped reminders live in `.claude/rules/`.
